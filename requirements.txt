@@ -1,6 +1,6 @@
 python-telegram-bot==20.7
-requests
-qrcode[pil]
-feedparser
-wikipedia-api
-Pillow
+requests==2.31.0
+qrcode[pil]==7.4.2
+feedparser==6.0.11
+wikipedia-api==0.6.0
+Pillow==10.2.0
