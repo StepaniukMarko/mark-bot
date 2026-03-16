@@ -125,7 +125,8 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["📝 Нотатки",   "✅ Задачі",    "⏰ Нагадування"],
     ["🧮 Калькулятор","📖 Вікіпедія","🌐 Переклад"],
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
-    ["💪 Мотивація", "📊 Статистика","❓ Допомога"],
+    ["🎨 Генерація", "📊 Статистика","❓ Допомога"],
+    ["💪 Мотивація"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -427,6 +428,31 @@ def get_crypto_price(coin_id: str) -> str:
         return "❌ Монету не знайдено."
     except:
         return "📡 Не вдалося отримати ціну криптовалюти."
+
+def analyze_image(image_url: str, question: str = "") -> str:
+    """Розпізнає зображення через Groq Vision"""
+    prompt = question if question else "Опиши детально що зображено на цій картинці українською мовою."
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": image_url}}
+        ]}],
+        "max_tokens": 1000,
+    }
+    try:
+        r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"❌ Не вдалося розпізнати зображення. ({e})"
+
+def generate_image(prompt: str) -> str:
+    """Генерує зображення через Pollinations AI — повертає URL"""
+    import urllib.parse
+    encoded = urllib.parse.quote(prompt)
+    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true"
 
 def get_ip_info(ip: str = "") -> str:
     try:
@@ -848,6 +874,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await simple[text](update, context)
         return
 
+    if text == "🎨 Генерація":
+        user_state[uid] = "imagine"
+        await update.message.reply_text("🎨 Опиши що намалювати (англійською краще):\nНаприклад: `beautiful sunset over mountains`", parse_mode="Markdown")
+        return
+
     if text == "🔮 Гороскоп":
         await horoscope_cmd(update, context)
         return
@@ -897,6 +928,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "qr":
         buf = generate_qr(text)
         await update.message.reply_photo(photo=buf, caption="📷 QR-код готовий ✅")
+        return
+    if state == "imagine":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        url = generate_image(text)
+        await update.message.reply_photo(photo=url, caption=f"🎨 *{text}*", parse_mode="Markdown")
         return
     if state == "short":
         await update.message.reply_text(shorten_url(text))
@@ -948,6 +984,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_dialog(uid, "assistant", reply)
     await update.message.reply_text(reply)
 
+async def imagine_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        prompt = " ".join(context.args)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        url = generate_image(prompt)
+        await update.message.reply_photo(photo=url, caption=f"🎨 *{prompt}*", parse_mode="Markdown")
+    else:
+        user_state[update.effective_user.id] = "imagine"
+        await update.message.reply_text("🎨 Опиши що намалювати (англійською краще):\nНаприклад: `beautiful sunset over mountains`", parse_mode="Markdown")
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробляє отримані фото — розпізнає через AI"""
+    uid = update.effective_user.id
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    # Отримуємо файл
+    photo = update.message.photo[-1]  # найбільша якість
+    file = await context.bot.get_file(photo.file_id)
+    image_url = file.file_path
+
+    question = update.message.caption or ""
+    await update.message.reply_text("🔍 Аналізую зображення...")
+    result = analyze_image(image_url, question)
+    await update.message.reply_text(f"🖼 *Аналіз зображення:*\n\n{result}", parse_mode="Markdown")
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"Помилка: {context.error}")
 
@@ -968,6 +1029,7 @@ if __name__ == "__main__":
         ("short", short_cmd), ("ip", ip_cmd), ("remind", remind_cmd),
         ("stats", stats_cmd), ("clear", clear_cmd),
         ("guess", guess_cmd), ("dice", dice_cmd), ("coin", coin_cmd),
+        ("imagine", imagine_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -978,6 +1040,7 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(game_callback,      pattern="^game\\|"))
     app.add_handler(CallbackQueryHandler(rps_callback,       pattern="^rps\\|"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(error_handler)
 
     print("🤖 Марк запущено! Ctrl+C щоб зупинити.")
