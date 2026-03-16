@@ -264,16 +264,53 @@ def register_user(user):
 #  УТИЛІТИ
 # ══════════════════════════════════════
 def get_weather(city: str) -> str:
+    # Спроба 1: wttr.in
     try:
         r = requests.get(
-            f"https://wttr.in/{city}?format=%l:+%C+%t,+вологість+%h,+вітер+%w&lang=uk",
-            timeout=6
+            f"https://wttr.in/{city}?format=%l:+%C+%t,+вологість+%h,+вітер+%w",
+            timeout=10,
+            headers={"User-Agent": "MarkBot/1.0"}
         )
-        if r.status_code == 200 and r.text.strip():
+        if r.status_code == 200 and r.text.strip() and "Unknown" not in r.text:
             return r.text.strip()
+    except Exception as e:
+        logging.warning(f"wttr.in failed: {e}")
+
+    # Спроба 2: Open-Meteo (безкоштовний, без API ключа)
+    try:
+        # Спочатку геокодуємо місто
+        geo = requests.get(
+            f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=uk",
+            timeout=8
+        ).json()
+        if geo.get("results"):
+            loc = geo["results"][0]
+            lat, lon = loc["latitude"], loc["longitude"]
+            name = loc.get("name", city)
+            country = loc.get("country", "")
+            weather = requests.get(
+                f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+                f"&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code"
+                f"&wind_speed_unit=kmh",
+                timeout=8
+            ).json()
+            cur = weather.get("current", {})
+            temp = cur.get("temperature_2m", "?")
+            hum  = cur.get("relative_humidity_2m", "?")
+            wind = cur.get("wind_speed_10m", "?")
+            code = cur.get("weather_code", 0)
+            # Простий опис за кодом
+            if code == 0: desc = "Ясно"
+            elif code <= 3: desc = "Хмарно"
+            elif code <= 67: desc = "Дощ"
+            elif code <= 77: desc = "Сніг"
+            elif code <= 99: desc = "Гроза"
+            else: desc = "Змінна хмарність"
+            return f"{name}, {country}: {desc} {temp}°C, вологість {hum}%, вітер {wind} км/г"
         return "😕 Місто не знайдено. Перевір назву."
-    except:
-        return "📡 Немає з'єднання з інтернетом."
+    except Exception as e:
+        logging.warning(f"open-meteo failed: {e}")
+        return "😕 Не вдалося отримати погоду. Спробуй ще раз."
 
 def get_news() -> str:
     try:
