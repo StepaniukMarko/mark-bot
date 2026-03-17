@@ -31,6 +31,7 @@ TASKS_FILE     = "tasks_tg.json"
 USERS_FILE     = "users_tg.json"
 REFS_FILE      = "refs_tg.json"
 PREMIUM_FILE   = "premium_tg.json"
+ADMIN_ID       = 1780948739
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +43,15 @@ user_histories : dict[int, list]  = {}
 user_state     : dict[int, str]   = {}
 guess_games    : dict[int, dict]  = {}   # {user_id: {number, attempts}}
 user_profiles  : dict[int, dict]  = {}
+user_lang      : dict[int, str]   = {}  # мова користувача
+
+LANG_PROMPTS = {
+    "uk": "Відповідай ВИКЛЮЧНО українською мовою.",
+    "en": "Reply ONLY in English language.",
+    "pl": "Odpowiadaj WYŁĄCZNIE w języku polskim.",
+    "de": "Antworte NUR auf Deutsch.",
+    "fr": "Réponds UNIQUEMENT en français.",
+}
 
 # ══════════════════════════════════════
 #  КОНТЕНТ
@@ -136,7 +146,8 @@ MAIN_KB = ReplyKeyboardMarkup([
 PAGE2_KB = ReplyKeyboardMarkup([
     ["⭐ Купити Преміум", "👥 Реферали"],
     ["📊 Мій статус",    "🔗 Моє посилання"],
-    ["⬅️ Назад"],
+    ["🔐 Пароль",        "🎭 Настрій",    "📐 Конвертер"],
+    ["🌐 Мова AI",       "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -191,10 +202,16 @@ def translate_keyboard(text: str):
 def ask_ai(user_id: int, message: str) -> str:
     history = user_histories.setdefault(user_id, [])
     history.append({"role": "user", "content": message})
+    lang = user_lang.get(user_id, "uk")
+    lang_instruction = LANG_PROMPTS.get(lang, LANG_PROMPTS["uk"])
+    system = SYSTEM_PROMPT.replace(
+        "Відповідай ВИКЛЮЧНО українською мовою",
+        lang_instruction
+    )
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + history[-20:],
+        "messages": [{"role": "system", "content": system}] + history[-20:],
         "temperature": 0.8,
         "max_tokens": 1500,
     }
@@ -491,6 +508,47 @@ def get_ip_info(ip: str = "") -> str:
     except:
         return "❌ Не вдалося отримати інформацію про IP."
 
+def generate_password(length: int = 16) -> str:
+    import string
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(random.choice(chars) for _ in range(length))
+
+def analyze_mood(text: str) -> str:
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content":
+            f"Визнач настрій цього тексту. Відповідай ТІЛЬКИ одним рядком українською у форматі:\n"
+            f"[емодзі] [настрій]: [коротке пояснення 1 речення]\n"
+            f"Наприклад: 😊 Радісний: текст виражає позитивні емоції.\n\nТекст: {text[:500]}"}],
+        "max_tokens": 100, "temperature": 0.3
+    }
+    try:
+        r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=10)
+        return r.json()["choices"][0]["message"]["content"].strip()
+    except:
+        return "😐 Нейтральний: не вдалося визначити настрій."
+
+def convert_units(value: float, from_unit: str, to_unit: str) -> str:
+    conversions = {
+        ("km", "mi"): 0.621371, ("mi", "km"): 1.60934,
+        ("kg", "lb"): 2.20462,  ("lb", "kg"): 0.453592,
+        ("m", "ft"):  3.28084,  ("ft", "m"):  0.3048,
+        ("c", "f"):   None,     ("f", "c"):   None,
+        ("l", "gal"): 0.264172, ("gal", "l"): 3.78541,
+        ("cm", "in"): 0.393701, ("in", "cm"): 2.54,
+    }
+    f, t = from_unit.lower(), to_unit.lower()
+    if (f, t) == ("c", "f"):
+        result = value * 9/5 + 32
+    elif (f, t) == ("f", "c"):
+        result = (value - 32) * 5/9
+    elif (f, t) in conversions and conversions[(f, t)]:
+        result = value * conversions[(f, t)]
+    else:
+        return f"❌ Не знаю як конвертувати {from_unit} → {to_unit}\nДоступні: km/mi, kg/lb, m/ft, °C/°F, l/gal, cm/in"
+    return f"📐 {value} {from_unit} = *{result:.4g} {to_unit}*"
+
 def shorten_url(url: str) -> str:
     try:
         r = requests.get(f"https://tinyurl.com/api-create.php?url={url}", timeout=6)
@@ -589,6 +647,148 @@ def check_ref_rewards(user_id: int) -> str:
         save_premium(data)
         msg = "🎉 3 друзі! Преміум на 7 днів активовано!"
     return msg
+
+async def password_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    length = 16
+    if context.args:
+        try:
+            length = max(8, min(32, int(context.args[0])))
+        except:
+            pass
+    pwd = generate_password(length)
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔄 Новий пароль", callback_data=f"pwd|{length}")
+    ]])
+    await update.message.reply_text(
+        f"🔐 *Безпечний пароль:*\n\n`{pwd}`\n\n"
+        f"Довжина: {length} символів\n"
+        f"/password 20 — для пароля з 20 символів",
+        parse_mode="Markdown", reply_markup=kb
+    )
+
+async def mood_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        text = " ".join(context.args)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await update.message.reply_text(f"🎭 *Аналіз настрою:*\n\n{analyze_mood(text)}", parse_mode="Markdown")
+    else:
+        user_state[update.effective_user.id] = "mood"
+        await update.message.reply_text("🎭 Введи текст для аналізу настрою:")
+
+async def convert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) >= 3:
+        try:
+            val = float(context.args[0])
+            await update.message.reply_text(
+                convert_units(val, context.args[1], context.args[2]),
+                parse_mode="Markdown"
+            )
+        except:
+            await update.message.reply_text("❌ Формат: /convert 100 km mi")
+    else:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("km → mi", callback_data="conv|1|km|mi"),
+             InlineKeyboardButton("mi → km", callback_data="conv|1|mi|km")],
+            [InlineKeyboardButton("kg → lb", callback_data="conv|1|kg|lb"),
+             InlineKeyboardButton("lb → kg", callback_data="conv|1|lb|kg")],
+            [InlineKeyboardButton("°C → °F", callback_data="conv|100|c|f"),
+             InlineKeyboardButton("°F → °C", callback_data="conv|212|f|c")],
+            [InlineKeyboardButton("m → ft",  callback_data="conv|1|m|ft"),
+             InlineKeyboardButton("cm → in", callback_data="conv|1|cm|in")],
+        ])
+        user_state[update.effective_user.id] = "convert"
+        await update.message.reply_text(
+            "📐 Конвертер одиниць\n\nОбери або введи: `100 km mi`",
+            parse_mode="Markdown", reply_markup=kb
+        )
+
+async def pwd_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    length = int(q.data.split("|")[1])
+    pwd = generate_password(length)
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Новий пароль", callback_data=f"pwd|{length}")]])
+    await q.edit_message_text(
+        f"🔐 *Безпечний пароль:*\n\n`{pwd}`\n\nДовжина: {length} символів",
+        parse_mode="Markdown", reply_markup=kb
+    )
+
+async def conv_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    _, val, f, t = q.data.split("|")
+    await q.edit_message_text(convert_units(float(val), f, t), parse_mode="Markdown")
+
+async def lang_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇺🇦 Українська", callback_data="lang|uk"),
+         InlineKeyboardButton("🇬🇧 English",    callback_data="lang|en")],
+        [InlineKeyboardButton("🇵🇱 Polski",      callback_data="lang|pl"),
+         InlineKeyboardButton("🇩🇪 Deutsch",     callback_data="lang|de")],
+        [InlineKeyboardButton("🇫🇷 Français",    callback_data="lang|fr")],
+    ])
+    await update.message.reply_text("🌐 Обери мову відповідей AI:", reply_markup=kb)
+
+async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    lang = q.data.split("|")[1]
+    user_lang[q.from_user.id] = lang
+    names = {"uk": "🇺🇦 Українська", "en": "🇬🇧 English", "pl": "🇵🇱 Polski",
+             "de": "🇩🇪 Deutsch", "fr": "🇫🇷 Français"}
+    await q.edit_message_text(f"✅ Мову змінено на {names.get(lang, lang)}")
+
+async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Немає доступу.")
+        return
+
+    users = {}
+    if os.path.exists(USERS_FILE):
+        try:
+            users = json.load(open(USERS_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+
+    total = len(users)
+    premium_count = sum(1 for uid in users if is_premium(int(uid)))
+    refs = load_refs()
+    total_refs = sum(len(v) for v in refs.values())
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Розсилка всім", callback_data="admin|broadcast")],
+        [InlineKeyboardButton("👥 Список юзерів", callback_data="admin|users")],
+    ])
+    await update.message.reply_text(
+        f"🔧 *Адмін панель*\n\n"
+        f"👥 Всього користувачів: {total}\n"
+        f"⭐ Преміум: {premium_count}\n"
+        f"🔗 Всього рефералів: {total_refs}\n"
+        f"🧠 Активних сесій AI: {len(user_histories)}",
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    if q.from_user.id != ADMIN_ID:
+        return
+    action = q.data.split("|")[1]
+    if action == "broadcast":
+        user_state[q.from_user.id] = "admin_broadcast"
+        await q.edit_message_text("📢 Введи текст розсилки — надішлю всім користувачам:")
+    elif action == "users":
+        users = {}
+        if os.path.exists(USERS_FILE):
+            try:
+                users = json.load(open(USERS_FILE, "r", encoding="utf-8"))
+            except:
+                pass
+        lines = [f"{i+1}. {v.get('name','')} (@{v.get('username','?')}) — {v.get('joined','')}"
+                 for i, (k, v) in enumerate(list(users.items())[:30])]
+        text = "\n".join(lines) if lines else "Порожньо"
+        await q.edit_message_text(f"👥 *Користувачі:*\n\n{text}", parse_mode="Markdown")
 
 async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -1096,7 +1296,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await simple[text](update, context)
         return
 
-    if text == "➡️ Ще функції":
+    if text == "🔐 Пароль":
+        await password_cmd(update, context)
+        return
+    if text == "🎭 Настрій":
+        user_state[uid] = "mood"
+        await update.message.reply_text("🎭 Введи текст для аналізу настрою:")
+        return
+    if text == "📐 Конвертер":
+        await convert_cmd(update, context)
+        return
+    if text == "🌐 Мова AI":
+        await lang_cmd(update, context)
+        return
         await update.message.reply_text("Сторінка 2:", reply_markup=PAGE2_KB)
         return
     if text == "⬅️ Назад":
@@ -1194,6 +1406,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "qr":
         buf = generate_qr(text)
         await update.message.reply_photo(photo=buf, caption="📷 QR-код готовий ✅")
+        return
+    if state == "mood":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await update.message.reply_text(f"🎭 *Аналіз настрою:*\n\n{analyze_mood(text)}", parse_mode="Markdown")
+        return
+    if state == "convert":
+        parts = text.split()
+        if len(parts) >= 3:
+            try:
+                await update.message.reply_text(convert_units(float(parts[0]), parts[1], parts[2]), parse_mode="Markdown")
+            except:
+                await update.message.reply_text("❌ Формат: 100 km mi")
+        else:
+            await update.message.reply_text("❌ Формат: 100 km mi")
+        return
+    if state == "admin_broadcast":
+        if update.effective_user.id != ADMIN_ID:
+            return
+        users = {}
+        if os.path.exists(USERS_FILE):
+            try:
+                users = json.load(open(USERS_FILE, "r", encoding="utf-8"))
+            except:
+                pass
+        sent, failed = 0, 0
+        for uid_str in users:
+            try:
+                await context.bot.send_message(chat_id=int(uid_str), text=f"📢 {text}")
+                sent += 1
+            except:
+                failed += 1
+        await update.message.reply_text(f"✅ Розсилка завершена!\nНадіслано: {sent}\nПомилок: {failed}")
         return
     if state == "imagine":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
@@ -1437,7 +1681,8 @@ if __name__ == "__main__":
         ("stats", stats_cmd), ("clear", clear_cmd),
         ("guess", guess_cmd), ("dice", dice_cmd), ("coin", coin_cmd),
         ("imagine", imagine_cmd), ("ref", ref_cmd), ("premium", premium_cmd),
-        ("music", music_cmd),
+        ("music", music_cmd), ("admin", admin_cmd), ("lang", lang_cmd),
+        ("password", password_cmd), ("mood", mood_cmd), ("convert", convert_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -1448,6 +1693,10 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(game_callback,      pattern="^game\\|"))
     app.add_handler(CallbackQueryHandler(rps_callback,       pattern="^rps\\|"))
     app.add_handler(CallbackQueryHandler(buy_callback,        pattern="^buy\\|"))
+    app.add_handler(CallbackQueryHandler(lang_callback,        pattern="^lang\\|"))
+    app.add_handler(CallbackQueryHandler(admin_callback,       pattern="^admin\\|"))
+    app.add_handler(CallbackQueryHandler(pwd_callback,         pattern="^pwd\\|"))
+    app.add_handler(CallbackQueryHandler(conv_callback,        pattern="^conv\\|"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
