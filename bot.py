@@ -147,7 +147,9 @@ PAGE2_KB = ReplyKeyboardMarkup([
     ["⭐ Купити Преміум", "👥 Реферали"],
     ["📊 Мій статус",    "🔗 Моє посилання"],
     ["🔐 Пароль",        "🎭 Настрій",    "📐 Конвертер"],
-    ["🌐 Мова AI",       "⬅️ Назад"],
+    ["🌐 Мова AI",       "📋 Шпаргалка",  "✍️ Граматика"],
+    ["📱 Пост",          "💡 Бізнес-ідея","💰 Витрати"],
+    ["🧠 Вікторина",     "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -718,6 +720,80 @@ async def password_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown", reply_markup=kb
     )
 
+async def cheatsheet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        topic = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "cheatsheet"
+        await update.message.reply_text("📋 Введи тему для шпаргалки:\nНаприклад: `Друга світова війна` або `Python основи`")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = ask_ai(update.effective_user.id,
+        f"Зроби коротку шпаргалку по темі '{topic}'. "
+        f"Формат: ключові факти, дати, визначення — коротко і по суті. "
+        f"Максимум 20 пунктів. Без зайвого тексту.")
+    await update.message.reply_text(f"📋 Шпаргалка: {topic}\n\n{result}")
+
+async def grammar_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        text_to_check = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "grammar"
+        await update.message.reply_text("✍️ Введи текст для перевірки граматики:")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = ask_ai(update.effective_user.id,
+        f"Перевір граматику і стиль цього тексту. "
+        f"Спочатку покажи виправлений текст, потім список помилок які були. "
+        f"Текст: {text_to_check}")
+    await update.message.reply_text(f"✍️ Перевірка тексту:\n\n{result}")
+
+async def post_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        topic = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "post"
+        await update.message.reply_text(
+            "📱 Для якої платформи і на яку тему?\n"
+            "Наприклад: `TikTok про мого кота` або `Instagram мотивація`"
+        )
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("TikTok", callback_data=f"post|tiktok|{topic[:100]}"),
+         InlineKeyboardButton("Instagram", callback_data=f"post|instagram|{topic[:100]}")],
+        [InlineKeyboardButton("Twitter/X", callback_data=f"post|twitter|{topic[:100]}"),
+         InlineKeyboardButton("Facebook", callback_data=f"post|facebook|{topic[:100]}")],
+    ])
+    await update.message.reply_text("📱 Обери платформу:", reply_markup=kb)
+
+async def post_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer("Генерую пост...")
+    _, platform, topic = q.data.split("|", 2)
+    result = ask_ai(q.from_user.id,
+        f"Напиши готовий пост для {platform} на тему '{topic}'. "
+        f"Включи: чіпляючий початок, основний текст, заклик до дії, хештеги. "
+        f"Стиль молодіжний і живий.")
+    await q.edit_message_text(f"📱 Пост для {platform}:\n\n{result}")
+
+async def idea_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        niche = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "idea"
+        await update.message.reply_text(
+            "💡 В якій сфері шукаєш ідею?\n"
+            "Наприклад: `онлайн`, `для школяра`, `з мінімальними вкладеннями`"
+        )
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = ask_ai(update.effective_user.id,
+        f"Згенеруй 5 конкретних бізнес-ідей для заробітку в сфері '{niche}'. "
+        f"Для кожної: назва, суть, як почати, скільки можна заробити. "
+        f"Реальні ідеї які можна почати зараз.")
+    await update.message.reply_text(f"💡 Бізнес-ідеї: {niche}\n\n{result}")
+
 async def mood_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         text = " ".join(context.args)
@@ -789,6 +865,145 @@ async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     names = {"uk": "🇺🇦 Українська", "en": "🇬🇧 English", "pl": "🇵🇱 Polski",
              "de": "🇩🇪 Deutsch", "fr": "🇫🇷 Français"}
     await q.edit_message_text(f"✅ Мову змінено на {names.get(lang, lang)}")
+
+EXPENSES_FILE = "expenses_tg.json"
+QUIZ_FILE     = "quiz_tg.json"
+
+def load_expenses(user_id: int) -> list:
+    if os.path.exists(EXPENSES_FILE):
+        try:
+            data = json.load(open(EXPENSES_FILE, "r", encoding="utf-8"))
+            return data.get(str(user_id), [])
+        except:
+            pass
+    return []
+
+def save_expense(user_id: int, amount: float, category: str, note: str = ""):
+    data = {}
+    if os.path.exists(EXPENSES_FILE):
+        try:
+            data = json.load(open(EXPENSES_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    key = str(user_id)
+    if key not in data:
+        data[key] = []
+    data[key].append({
+        "amount": amount, "category": category, "note": note,
+        "date": datetime.now().strftime("%d.%m %H:%M")
+    })
+    json.dump(data, open(EXPENSES_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+async def expense_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        try:
+            amount = float(context.args[0])
+            category = context.args[1] if len(context.args) > 1 else "Інше"
+            note = " ".join(context.args[2:]) if len(context.args) > 2 else ""
+            save_expense(uid, amount, category, note)
+            await update.message.reply_text(f"💸 Записано: {amount} грн — {category}")
+        except:
+            await update.message.reply_text("❌ Формат: /expense 150 Їжа кава")
+    else:
+        expenses = load_expenses(uid)
+        if not expenses:
+            await update.message.reply_text(
+                "💰 Трекер витрат порожній.\n\nДодай витрату:\n`/expense 150 Їжа`\n`/expense 500 Транспорт`",
+                parse_mode="Markdown"
+            )
+            return
+        total = sum(e["amount"] for e in expenses)
+        by_cat = {}
+        for e in expenses:
+            by_cat[e["category"]] = by_cat.get(e["category"], 0) + e["amount"]
+        lines = [f"• {cat}: {amt:.0f} грн" for cat, amt in sorted(by_cat.items(), key=lambda x: -x[1])]
+        recent = [f"{e['date']} — {e['amount']} грн ({e['category']})" for e in expenses[-5:]]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Очистити витрати", callback_data=f"exp_clear|{uid}")]])
+        await update.message.reply_text(
+            f"💰 Твої витрати:\n\n" + "\n".join(lines) +
+            f"\n\n💵 Всього: {total:.0f} грн\n\n📋 Останні:\n" + "\n".join(recent),
+            reply_markup=kb
+        )
+
+async def exp_clear_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = int(q.data.split("|")[1])
+    if q.from_user.id != uid:
+        return
+    data = {}
+    if os.path.exists(EXPENSES_FILE):
+        try:
+            data = json.load(open(EXPENSES_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    data[str(uid)] = []
+    json.dump(data, open(EXPENSES_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    await q.edit_message_text("🗑 Витрати очищено!")
+
+QUIZ_QUESTIONS = [
+    {"q": "Яка столиця України?", "a": ["Київ", "Харків", "Львів", "Одеса"], "correct": 0},
+    {"q": "Скільки планет у Сонячній системі?", "a": ["7", "8", "9", "10"], "correct": 1},
+    {"q": "Хто написав 'Кобзар'?", "a": ["Франко", "Шевченко", "Леся Українка", "Котляревський"], "correct": 1},
+    {"q": "Яка найбільша країна у світі?", "a": ["США", "Китай", "Росія", "Канада"], "correct": 2},
+    {"q": "Скільки байт в 1 кілобайті?", "a": ["512", "1000", "1024", "2048"], "correct": 2},
+    {"q": "Який рік заснування Києва?", "a": ["482", "882", "1054", "1240"], "correct": 0},
+    {"q": "Що означає HTML?", "a": ["High Text ML", "HyperText Markup Language", "Home Tool ML", "Hyper Transfer ML"], "correct": 1},
+    {"q": "Яка формула води?", "a": ["H2O2", "HO2", "H2O", "H3O"], "correct": 2},
+]
+
+quiz_scores: dict[int, dict] = {}
+
+async def quiz_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    q_idx = random.randint(0, len(QUIZ_QUESTIONS)-1)
+    quiz_scores[uid] = quiz_scores.get(uid, {"score": 0, "total": 0})
+    quiz_scores[uid]["current"] = q_idx
+    q = QUIZ_QUESTIONS[q_idx]
+    buttons = [[InlineKeyboardButton(ans, callback_data=f"quiz|{q_idx}|{i}")]
+               for i, ans in enumerate(q["a"])]
+    score = quiz_scores[uid]
+    await update.message.reply_text(
+        f"🧠 Вікторина!\n\n{q['q']}\n\nРахунок: {score['score']}/{score['total']}",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q_obj = update.callback_query
+    await q_obj.answer()
+    _, q_idx, answer = q_obj.data.split("|")
+    q_idx, answer = int(q_idx), int(answer)
+    uid = q_obj.from_user.id
+    question = QUIZ_QUESTIONS[q_idx]
+    if uid not in quiz_scores:
+        quiz_scores[uid] = {"score": 0, "total": 0}
+    quiz_scores[uid]["total"] += 1
+    if answer == question["correct"]:
+        quiz_scores[uid]["score"] += 1
+        result = f"✅ Правильно! +1 бал"
+    else:
+        result = f"❌ Неправильно! Правильна відповідь: {question['a'][question['correct']]}"
+    score = quiz_scores[uid]
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("➡️ Наступне питання", callback_data="quiz_next")]])
+    await q_obj.edit_message_text(
+        f"{result}\n\nРахунок: {score['score']}/{score['total']}",
+        reply_markup=kb
+    )
+
+async def quiz_next_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    q_idx = random.randint(0, len(QUIZ_QUESTIONS)-1)
+    question = QUIZ_QUESTIONS[q_idx]
+    buttons = [[InlineKeyboardButton(ans, callback_data=f"quiz|{q_idx}|{i}")]
+               for i, ans in enumerate(question["a"])]
+    score = quiz_scores.get(uid, {"score": 0, "total": 0})
+    await q.edit_message_text(
+        f"🧠 Вікторина!\n\n{question['q']}\n\nРахунок: {score['score']}/{score['total']}",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -1437,6 +1652,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🌐 Мова AI":
         await lang_cmd(update, context)
         return
+    if text == "📋 Шпаргалка":
+        user_state[uid] = "cheatsheet"
+        await update.message.reply_text("📋 Введи тему для шпаргалки:")
+        return
+    if text == "✍️ Граматика":
+        user_state[uid] = "grammar"
+        await update.message.reply_text("✍️ Введи текст для перевірки граматики:")
+        return
+    if text == "📱 Пост":
+        user_state[uid] = "post"
+        await update.message.reply_text("📱 На яку тему пост?\nНаприклад: `мотивація для школярів`")
+        return
+    if text == "💡 Бізнес-ідея":
+        user_state[uid] = "idea"
+        await update.message.reply_text("💡 В якій сфері шукаєш ідею?")
+        return
+    if text == "💰 Витрати":
+        await expense_cmd(update, context)
+        return
+    if text == "🧠 Вікторина":
+        await quiz_cmd(update, context)
+        return
     if text == "➡️ Ще функції":
         await update.message.reply_text("Сторінка 2:", reply_markup=PAGE2_KB)
         return
@@ -1539,6 +1776,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "calc":
         await update.message.reply_text(calculate(text), parse_mode="Markdown")
+        return
+    if state == "cheatsheet":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Зроби коротку шпаргалку по темі '{text}'. Ключові факти, дати, визначення — коротко і по суті. Максимум 20 пунктів.")
+        await update.message.reply_text(f"📋 Шпаргалка: {text}\n\n{result}")
+        return
+    if state == "grammar":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Перевір граматику і стиль. Спочатку виправлений текст, потім список помилок: {text}")
+        await update.message.reply_text(f"✍️ Перевірка:\n\n{result}")
+        return
+    if state == "post":
+        await update.message.reply_text("📱 Обери платформу:", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("TikTok", callback_data=f"post|tiktok|{text[:100]}"),
+             InlineKeyboardButton("Instagram", callback_data=f"post|instagram|{text[:100]}")],
+            [InlineKeyboardButton("Twitter/X", callback_data=f"post|twitter|{text[:100]}"),
+             InlineKeyboardButton("Facebook", callback_data=f"post|facebook|{text[:100]}")],
+        ]))
+        return
+    if state == "idea":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Згенеруй 5 конкретних бізнес-ідей для '{text}'. Для кожної: назва, суть, як почати, скільки заробити.")
+        await update.message.reply_text(f"💡 Бізнес-ідеї:\n\n{result}")
         return
     if state == "search":
         await _do_search(update, context, text)
@@ -1839,7 +2099,8 @@ if __name__ == "__main__":
         ("imagine", imagine_cmd), ("ref", ref_cmd), ("premium", premium_cmd),
         ("music", music_cmd), ("admin", admin_cmd), ("lang", lang_cmd),
         ("password", password_cmd), ("mood", mood_cmd), ("convert", convert_cmd),
-        ("search", search_cmd),
+        ("search", search_cmd), ("cheatsheet", cheatsheet_cmd), ("grammar", grammar_cmd),
+        ("post", post_cmd), ("idea", idea_cmd), ("expense", expense_cmd), ("quiz", quiz_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -1854,6 +2115,10 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(admin_callback,       pattern="^admin\\|"))
     app.add_handler(CallbackQueryHandler(pwd_callback,         pattern="^pwd\\|"))
     app.add_handler(CallbackQueryHandler(conv_callback,        pattern="^conv\\|"))
+    app.add_handler(CallbackQueryHandler(post_callback,        pattern="^post\\|"))
+    app.add_handler(CallbackQueryHandler(exp_clear_callback,   pattern="^exp_clear\\|"))
+    app.add_handler(CallbackQueryHandler(quiz_callback,        pattern="^quiz\\|\\d"))
+    app.add_handler(CallbackQueryHandler(quiz_next_callback,   pattern="^quiz_next$"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
