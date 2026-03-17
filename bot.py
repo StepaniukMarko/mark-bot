@@ -1020,6 +1020,50 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = analyze_image(image_url, question)
     await update.message.reply_text(f"🖼 Аналіз зображення:\n\n{result}")
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Читає PDF та текстові файли і аналізує через AI"""
+    doc = update.message.document
+    fname = doc.file_name or ""
+    allowed = (".pdf", ".txt", ".py", ".js", ".html", ".css", ".json", ".csv", ".md")
+
+    if not any(fname.lower().endswith(ext) for ext in allowed):
+        await update.message.reply_text("❌ Підтримую: PDF, TXT, PY, JS, HTML, CSS, JSON, CSV, MD")
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    await update.message.reply_text("📄 Читаю файл...")
+
+    file = await context.bot.get_file(doc.file_id)
+    file_bytes = await file.download_as_bytearray()
+
+    text = ""
+    try:
+        if fname.lower().endswith(".pdf"):
+            import io as _io
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(_io.BytesIO(bytes(file_bytes)))
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            except ImportError:
+                await update.message.reply_text("❌ Для PDF потрібен pypdf. Надішли .txt файл.")
+                return
+        else:
+            text = file_bytes.decode("utf-8", errors="ignore")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Не вдалося прочитати файл: {e}")
+        return
+
+    if not text.strip():
+        await update.message.reply_text("😕 Файл порожній або не вдалося прочитати текст.")
+        return
+
+    # Обрізаємо до 4000 символів щоб не перевищити ліміт
+    text = text[:4000]
+    question = update.message.caption or "Проаналізуй цей файл і коротко опиши що в ньому."
+    uid = update.effective_user.id
+    reply = ask_ai(uid, f"{question}\n\n---\n{text}")
+    await update.message.reply_text(f"📄 *{fname}*\n\n{reply}", parse_mode="Markdown")
+
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Розпізнає голосове повідомлення через Groq Whisper"""
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -1092,6 +1136,7 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_error_handler(error_handler)
 
     print("🤖 Марк запущено! Ctrl+C щоб зупинити.")
