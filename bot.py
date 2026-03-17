@@ -878,7 +878,7 @@ async def ref_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"👥 *Реферальна система*\n\n"
-        f"Твоє посилання:\n`{link}`\n\n"
+        f"Твоє посилання:\n{link}\n\n"
         f"Запрошено друзів: *{count}*\n"
         f"{prem_text}{next_reward}\n\n"
         f"3 друзі = Преміум 7 днів\n"
