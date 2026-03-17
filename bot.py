@@ -1304,7 +1304,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🎭 Введи текст для аналізу настрою:")
         return
     if text == "📐 Конвертер":
-        await convert_cmd(update, context)
+        user_state[uid] = "convert"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("km → mi", callback_data="conv|1|km|mi"),
+             InlineKeyboardButton("mi → km", callback_data="conv|1|mi|km")],
+            [InlineKeyboardButton("kg → lb", callback_data="conv|1|kg|lb"),
+             InlineKeyboardButton("lb → kg", callback_data="conv|1|lb|kg")],
+            [InlineKeyboardButton("°C → °F", callback_data="conv|100|c|f"),
+             InlineKeyboardButton("°F → °C", callback_data="conv|212|f|c")],
+            [InlineKeyboardButton("m → ft",  callback_data="conv|1|m|ft"),
+             InlineKeyboardButton("cm → in", callback_data="conv|1|cm|in")],
+        ])
+        await update.message.reply_text(
+            "📐 *Конвертер одиниць*\n\nОбери або напиши: `100 km mi`",
+            parse_mode="Markdown", reply_markup=kb
+        )
         return
     if text == "🌐 Мова AI":
         await lang_cmd(update, context)
