@@ -139,8 +139,8 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["🧮 Калькулятор","📖 Вікіпедія","🌐 Переклад"],
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
     ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
-    ["💪 Мотивація", "📊 Статистика","❓ Допомога"],
-    ["➡️ Ще функції"],
+    ["� Пошук",     "📊 Статистика","❓ Допомога"],
+    ["💪 Мотивація", "➡️ Ще функції"],
 ], resize_keyboard=True)
 
 PAGE2_KB = ReplyKeyboardMarkup([
@@ -362,6 +362,58 @@ def calculate(expr: str) -> str:
         return "❌ Ділення на нуль! 😅"
     except:
         return "❌ Не можу порахувати. Перевір вираз.\nПриклад: 25 * 4 + 10"
+
+def deep_search(query: str, user_id: int) -> str:
+    """Глибокий пошук: Wikipedia + DuckDuckGo + AI аналіз"""
+    sources = []
+
+    # 1. Wikipedia
+    try:
+        import wikipediaapi
+        wiki = wikipediaapi.Wikipedia(language='uk', user_agent="MarkBot/5.0")
+        page = wiki.page(query)
+        if page.exists():
+            sources.append(f"[Wikipedia]\n{page.summary[:1000]}")
+        else:
+            # Спробуємо англійською
+            wiki_en = wikipediaapi.Wikipedia(language='en', user_agent="MarkBot/5.0")
+            page_en = wiki_en.page(query)
+            if page_en.exists():
+                sources.append(f"[Wikipedia EN]\n{page_en.summary[:1000]}")
+    except:
+        pass
+
+    # 2. DuckDuckGo Instant Answer API
+    try:
+        r = requests.get(
+            "https://api.duckduckgo.com/",
+            params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
+            timeout=8
+        )
+        data = r.json()
+        if data.get("AbstractText"):
+            sources.append(f"[DuckDuckGo]\n{data['AbstractText'][:800]}")
+        if data.get("Answer"):
+            sources.append(f"[Пряма відповідь]\n{data['Answer']}")
+        # Пов'язані теми
+        related = [t.get("Text","") for t in data.get("RelatedTopics", [])[:3] if t.get("Text")]
+        if related:
+            sources.append(f"[Пов'язане]\n" + "\n".join(related))
+    except:
+        pass
+
+    if not sources:
+        # Якщо нічого не знайшли — просто AI
+        return ask_ai(user_id, f"Проведи глибокий аналіз і дай вичерпну відповідь про: {query}")
+
+    # 3. AI аналізує всі джерела
+    combined = "\n\n---\n\n".join(sources)
+    prompt = (
+        f"На основі цих даних з різних джерел дай ГЛИБОКИЙ і ВИЧЕРПНИЙ аналіз про '{query}'.\n"
+        f"Структуруй відповідь: основне, деталі, цікаві факти, висновок.\n\n"
+        f"ДАНІ:\n{combined[:3000]}"
+    )
+    return ask_ai(user_id, prompt)
 
 def search_wiki(topic: str) -> str:
     try:
@@ -1109,6 +1161,68 @@ async def calc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_state[update.effective_user.id] = "calc"
         await update.message.reply_text("🧮 Введи вираз:\nНаприклад: `25 * 4 + 10`", parse_mode="Markdown")
 
+async def search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        query = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "search"
+        await update.message.reply_text(
+            "🔍 Що шукати?\n\nМожна написати:\n"
+            "• `iPhone 15 Pro OLX` — пошук на OLX\n"
+            "• `Nike Air Max Rozetka` — пошук на Rozetka\n"
+            "• `MacBook eBay` — пошук на eBay\n"
+            "• Або просто назву товару",
+            parse_mode="Markdown"
+        )
+        return
+    await _do_search(update, context, query)
+
+async def _do_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
+    import urllib.parse
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    q = urllib.parse.quote_plus(query)
+
+    # Визначаємо на якому сайті шукати
+    ql = query.lower()
+    if "olx" in ql:
+        q_clean = urllib.parse.quote_plus(query.lower().replace("olx","").strip())
+        sites = [("🛒 OLX", f"https://www.olx.ua/uk/list/q-{q_clean}/")]
+    elif "rozetka" in ql:
+        q_clean = urllib.parse.quote_plus(query.lower().replace("rozetka","").strip())
+        sites = [("🛍 Rozetka", f"https://rozetka.com.ua/ua/search/?text={q_clean}")]
+    elif "ebay" in ql:
+        q_clean = urllib.parse.quote_plus(query.lower().replace("ebay","").strip())
+        sites = [("🌐 eBay", f"https://www.ebay.com/sch/i.html?_nkw={q_clean}")]
+    elif "amazon" in ql:
+        q_clean = urllib.parse.quote_plus(query.lower().replace("amazon","").strip())
+        sites = [("📦 Amazon", f"https://www.amazon.com/s?k={q_clean}")]
+    else:
+        # Шукаємо на всіх одразу
+        sites = [
+            ("🛒 OLX",      f"https://www.olx.ua/uk/list/q-{q}/"),
+            ("🛍 Rozetka",  f"https://rozetka.com.ua/ua/search/?text={q}"),
+            ("🌐 eBay",     f"https://www.ebay.com/sch/i.html?_nkw={q}"),
+            ("📦 Amazon",   f"https://www.amazon.com/s?k={q}"),
+            ("🔍 Google",   f"https://www.google.com/search?q={q}"),
+        ]
+
+    # AI аналіз що шукати і поради
+    ai_tip = ask_ai(update.effective_user.id,
+        f"Дай короткі поради (2-3 речення) як краще шукати '{query}': на що звернути увагу, "
+        f"яка середня ціна, як не натрапити на шахраїв. Відповідь коротка і практична.")
+
+    buttons = [[InlineKeyboardButton(name, url=url)] for name, url in sites]
+    kb = InlineKeyboardMarkup(buttons)
+
+    await update.message.reply_text(
+        f"🔍 *Пошук: {query}*\n\n"
+        f"💡 {ai_tip}\n\n"
+        f"Натисни кнопку щоб відкрити:",
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+
 async def wiki_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -1361,6 +1475,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+    if text == "🎨 Генерація":
         user_state[uid] = "imagine"
         await update.message.reply_text("🎨 Опиши що намалювати (англійською краще):\nНаприклад: `beautiful sunset over mountains`", parse_mode="Markdown")
         return
@@ -1370,6 +1485,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if text == "⭐ Преміум":
         await premium_cmd(update, context)
+        return
+    if text == "🔍 Пошук":
+        user_state[uid] = "search"
+        await update.message.reply_text(
+            "🔍 Що шукати?\n\nПриклади:\n"
+            "• `iPhone 15 OLX`\n"
+            "• `Nike Air Max Rozetka`\n"
+            "• `MacBook eBay`\n"
+            "• Або просто назву товару",
+            parse_mode="Markdown"
+        )
         return
 
     if text == "🔮 Гороскоп":
@@ -1413,6 +1539,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "calc":
         await update.message.reply_text(calculate(text), parse_mode="Markdown")
+        return
+    if state == "search":
+        await _do_search(update, context, text)
         return
     if state == "wiki":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -1524,6 +1653,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_state[uid] = "guess"
             await update.message.reply_text("🔢 Введи число від 1 до 100:")
         return
+
+    # --- Автопошук ---
+    search_triggers = ["знайди", "пошукай", "знайти", "пошукати", "де купити", "де знайти"]
+    if any(text.lower().startswith(t) for t in search_triggers):
+        query = text
+        for t in search_triggers:
+            if text.lower().startswith(t):
+                query = text[len(t):].strip()
+                break
+        if query:
+            await _do_search(update, context, query)
+            return
 
     # --- AI відповідь ---
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -1698,6 +1839,7 @@ if __name__ == "__main__":
         ("imagine", imagine_cmd), ("ref", ref_cmd), ("premium", premium_cmd),
         ("music", music_cmd), ("admin", admin_cmd), ("lang", lang_cmd),
         ("password", password_cmd), ("mood", mood_cmd), ("convert", convert_cmd),
+        ("search", search_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
