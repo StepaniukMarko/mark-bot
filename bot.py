@@ -1007,7 +1007,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     question = update.message.caption or ""
     await update.message.reply_text("🔍 Аналізую зображення...")
     result = analyze_image(image_url, question)
-    await update.message.reply_text(f"🖼 *Аналіз зображення:*\n\n{result}", parse_mode="Markdown")
+    await update.message.reply_text(f"🖼 Аналіз зображення:\n\n{result}")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"Помилка: {context.error}")
