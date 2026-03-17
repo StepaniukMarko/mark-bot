@@ -1020,6 +1020,45 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = analyze_image(image_url, question)
     await update.message.reply_text(f"🖼 Аналіз зображення:\n\n{result}")
 
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Розпізнає голосове повідомлення через Groq Whisper"""
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    await update.message.reply_text("🎤 Розпізнаю голос...")
+
+    voice = update.message.voice
+    file = await context.bot.get_file(voice.file_id)
+
+    # Завантажуємо аудіо
+    audio_bytes = await file.download_as_bytearray()
+
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+    files = {
+        "file": ("voice.ogg", bytes(audio_bytes), "audio/ogg"),
+        "model": (None, "whisper-large-v3"),
+        "language": (None, "uk"),
+        "response_format": (None, "text"),
+    }
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers=headers, files=files, timeout=30
+        )
+        r.raise_for_status()
+        text = r.text.strip()
+        if not text:
+            await update.message.reply_text("😕 Не вдалося розпізнати. Спробуй ще раз.")
+            return
+
+        await update.message.reply_text(f"🎤 Ти сказав:\n_{text}_\n\n⏳ Думаю...", parse_mode="Markdown")
+
+        # Відповідаємо через AI
+        uid = update.effective_user.id
+        reply = ask_ai(uid, text)
+        await update.message.reply_text(reply)
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Помилка розпізнавання: {e}")
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"Помилка: {context.error}")
 
@@ -1052,6 +1091,7 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(rps_callback,       pattern="^rps\\|"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_error_handler(error_handler)
 
     print("🤖 Марк запущено! Ctrl+C щоб зупинити.")
