@@ -432,6 +432,7 @@ def get_crypto_price(coin_id: str) -> str:
 def analyze_image(image_url: str, question: str = "") -> str:
     """Розпізнає зображення через Groq Vision"""
     prompt = question if question else "Опиши детально що зображено на цій картинці українською мовою."
+    prompt += "\n\nВАЖЛИВО: відповідай простим текстом БЕЗ Markdown, без **, ##, $, без жодного форматування."
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "meta-llama/llama-4-scout-17b-16e-instruct",
