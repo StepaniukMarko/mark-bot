@@ -582,6 +582,66 @@ def check_ref_rewards(user_id: int) -> str:
         msg = "🎉 3 друзі! Преміум на 7 днів активовано!"
     return msg
 
+async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    prem = is_premium(uid)
+
+    if prem:
+        data = load_premium()
+        expires = data.get(str(uid), {}).get("expires", "")
+        try:
+            exp_str = datetime.fromisoformat(expires).strftime("%d.%m.%Y")
+        except:
+            exp_str = "?"
+        await update.message.reply_text(
+            f"⭐ У тебе вже є Преміум до {exp_str}!\n\nНасолоджуйся необмеженим AI 🚀"
+        )
+        return
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⭐ 7 днів — 50 Stars",  callback_data="buy|7|50")],
+        [InlineKeyboardButton("⭐ 30 днів — 150 Stars", callback_data="buy|30|150")],
+        [InlineKeyboardButton("⭐ 90 днів — 350 Stars", callback_data="buy|90|350")],
+    ])
+    await update.message.reply_text(
+        "⭐ *Преміум доступ*\n\n"
+        "Що дає Преміум:\n"
+        "• Необмежені AI запити\n"
+        "• Пріоритетні відповіді\n"
+        "• Значок ⭐ в профілі\n\n"
+        "Оплата через Telegram Stars — безпечно і швидко:",
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+
+async def buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    _, days, stars = q.data.split("|")
+    days, stars = int(days), int(stars)
+    await context.bot.send_invoice(
+        chat_id=q.from_user.id,
+        title=f"Преміум на {days} днів",
+        description=f"Необмежений AI доступ на {days} днів",
+        payload=f"premium_{days}",
+        currency="XTR",
+        prices=[{"label": f"Преміум {days}д", "amount": stars}],
+        provider_token=""
+    )
+
+async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.pre_checkout_query.answer(ok=True)
+
+async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    payload = update.message.successful_payment.invoice_payload
+    days = int(payload.split("_")[1])
+    grant_premium(uid, days)
+    await update.message.reply_text(
+        f"✅ Оплата успішна! Преміум на {days} днів активовано!\n\n"
+        f"Дякуємо за підтримку ⭐",
+    )
+
 async def ref_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     bot_info = await context.bot.get_me()
@@ -1266,7 +1326,7 @@ if __name__ == "__main__":
         ("short", short_cmd), ("ip", ip_cmd), ("remind", remind_cmd),
         ("stats", stats_cmd), ("clear", clear_cmd),
         ("guess", guess_cmd), ("dice", dice_cmd), ("coin", coin_cmd),
-        ("imagine", imagine_cmd), ("ref", ref_cmd),
+        ("imagine", imagine_cmd), ("ref", ref_cmd), ("premium", premium_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -1276,6 +1336,10 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(crypto_callback,    pattern="^crypto\\|"))
     app.add_handler(CallbackQueryHandler(game_callback,      pattern="^game\\|"))
     app.add_handler(CallbackQueryHandler(rps_callback,       pattern="^rps\\|"))
+    app.add_handler(CallbackQueryHandler(buy_callback,        pattern="^buy\\|"))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
+    from telegram.ext import PreCheckoutQueryHandler
+    app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
