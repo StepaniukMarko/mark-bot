@@ -29,6 +29,8 @@ DIALOG_FILE    = "dialog_history.json"
 NOTES_FILE     = "notes_tg.txt"
 TASKS_FILE     = "tasks_tg.json"
 USERS_FILE     = "users_tg.json"
+REFS_FILE      = "refs_tg.json"
+PREMIUM_FILE   = "premium_tg.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -493,6 +495,129 @@ def shorten_url(url: str) -> str:
 # ══════════════════════════════════════
 #  НОТАТКИ
 # ══════════════════════════════════════
+def load_refs() -> dict:
+    if os.path.exists(REFS_FILE):
+        try:
+            return json.load(open(REFS_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    return {}
+
+def save_refs(refs: dict):
+    json.dump(refs, open(REFS_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+def add_referral(inviter_id: int, new_user_id: int):
+    refs = load_refs()
+    key = str(inviter_id)
+    if key not in refs:
+        refs[key] = []
+    if new_user_id not in refs[key]:
+        refs[key].append(new_user_id)
+        save_refs(refs)
+        return True  # новий реферал
+    return False
+
+def get_ref_count(user_id: int) -> int:
+    refs = load_refs()
+    return len(refs.get(str(user_id), []))
+
+def load_premium() -> dict:
+    if os.path.exists(PREMIUM_FILE):
+        try:
+            return json.load(open(PREMIUM_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    return {}
+
+def save_premium(data: dict):
+    json.dump(data, open(PREMIUM_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+def is_premium(user_id: int) -> bool:
+    data = load_premium()
+    entry = data.get(str(user_id))
+    if not entry:
+        return False
+    from datetime import datetime
+    expires = datetime.fromisoformat(entry["expires"])
+    return datetime.now() < expires
+
+def grant_premium(user_id: int, days: int):
+    data = load_premium()
+    from datetime import datetime, timedelta
+    key = str(user_id)
+    # Якщо вже є преміум — продовжуємо
+    if key in data:
+        try:
+            current = datetime.fromisoformat(data[key]["expires"])
+            if current > datetime.now():
+                expires = current + timedelta(days=days)
+            else:
+                expires = datetime.now() + timedelta(days=days)
+        except:
+            expires = datetime.now() + timedelta(days=days)
+    else:
+        expires = datetime.now() + timedelta(days=days)
+    data[key] = {"expires": expires.isoformat()}
+    save_premium(data)
+
+def check_ref_rewards(user_id: int) -> str:
+    """Перевіряє чи треба видати нагороду за рефералів"""
+    count = get_ref_count(user_id)
+    data = load_premium()
+    key = str(user_id)
+    rewarded = data.get(key, {}).get("ref_rewarded", 0)
+
+    msg = ""
+    if count >= 10 and rewarded < 10:
+        grant_premium(user_id, 30)
+        data = load_premium()
+        data[key]["ref_rewarded"] = 10
+        save_premium(data)
+        msg = "🏆 10 друзів! Преміум на 30 днів активовано!"
+    elif count >= 3 and rewarded < 3:
+        grant_premium(user_id, 7)
+        data = load_premium()
+        data[key]["ref_rewarded"] = 3
+        save_premium(data)
+        msg = "🎉 3 друзі! Преміум на 7 днів активовано!"
+    return msg
+
+async def ref_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    bot_info = await context.bot.get_me()
+    bot_username = bot_info.username
+    link = f"https://t.me/{bot_username}?start=ref{uid}"
+    count = get_ref_count(uid)
+    prem = is_premium(uid)
+
+    if prem:
+        data = load_premium()
+        expires = data.get(str(uid), {}).get("expires", "")
+        try:
+            from datetime import datetime
+            exp_str = datetime.fromisoformat(expires).strftime("%d.%m.%Y")
+        except:
+            exp_str = "?"
+        prem_text = f"⭐ Преміум активний до {exp_str}"
+    else:
+        prem_text = "👤 Звичайний акаунт"
+
+    next_reward = ""
+    if count < 3:
+        next_reward = f"\n🎯 До преміуму на 7 днів: ще {3 - count} друзів"
+    elif count < 10:
+        next_reward = f"\n🎯 До преміуму на 30 днів: ще {10 - count} друзів"
+
+    await update.message.reply_text(
+        f"👥 *Реферальна система*\n\n"
+        f"Твоє посилання:\n`{link}`\n\n"
+        f"Запрошено друзів: *{count}*\n"
+        f"{prem_text}{next_reward}\n\n"
+        f"3 друзі = Преміум 7 днів\n"
+        f"10 друзів = Преміум 30 днів",
+        parse_mode="Markdown"
+    )
+
 def save_note(text: str):
     with open(NOTES_FILE, "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now().strftime('%d.%m %H:%M')}] {text}\n")
@@ -534,6 +659,24 @@ def show_tasks() -> str:
 # ══════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     register_user(update.effective_user)
+    uid = update.effective_user.id
+
+    # Обробка реферального посилання
+    if context.args and context.args[0].startswith("ref"):
+        try:
+            inviter_id = int(context.args[0][3:])
+            if inviter_id != uid:
+                is_new = add_referral(inviter_id, uid)
+                if is_new:
+                    reward_msg = check_ref_rewards(inviter_id)
+                    if reward_msg:
+                        try:
+                            await context.bot.send_message(chat_id=inviter_id, text=f"🎁 {reward_msg}")
+                        except:
+                            pass
+        except:
+            pass
+
     name = update.effective_user.first_name
     await update.message.reply_text(
         f"👋 Привіт, *{name}*\\! Я *Марк* — твій розумний AI\\-асистент 🤖✨\n\n"
@@ -1123,7 +1266,7 @@ if __name__ == "__main__":
         ("short", short_cmd), ("ip", ip_cmd), ("remind", remind_cmd),
         ("stats", stats_cmd), ("clear", clear_cmd),
         ("guess", guess_cmd), ("dice", dice_cmd), ("coin", coin_cmd),
-        ("imagine", imagine_cmd),
+        ("imagine", imagine_cmd), ("ref", ref_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
