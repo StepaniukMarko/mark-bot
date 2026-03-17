@@ -1309,6 +1309,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🌐 Мова AI":
         await lang_cmd(update, context)
         return
+    if text == "➡️ Ще функції":
         await update.message.reply_text("Сторінка 2:", reply_markup=PAGE2_KB)
         return
     if text == "⬅️ Назад":
