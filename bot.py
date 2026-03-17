@@ -150,7 +150,13 @@ PAGE2_KB = ReplyKeyboardMarkup([
     ["🌐 Мова AI",       "📋 Шпаргалка",  "✍️ Граматика"],
     ["📱 Пост",          "💡 Бізнес-ідея","💰 Витрати"],
     ["🧠 Вікторина",     "💑 Сумісність", "😂 Мем"],
-    ["📅 Розклад",       "⬅️ Назад"],
+    ["📅 Розклад",       "➡️ Сторінка 3", "⬅️ Назад"],
+], resize_keyboard=True)
+
+PAGE3_KB = ReplyKeyboardMarkup([
+    ["🍅 Помодоро",      "🎮 Нікнейм",    "🌐 Перевірка сайту"],
+    ["📝 Резюме тексту", "🔄 Синоніми",   "🌍 Країна по IP"],
+    ["⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -1098,6 +1104,112 @@ async def schedule_add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Формат: /schedule_add Пн 08:00 Математика")
 
+async def pomodoro_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🍅 25 хв роботи",   callback_data="pomo|25|5"),
+         InlineKeyboardButton("⚡ 50 хв роботи",   callback_data="pomo|50|10")],
+        [InlineKeyboardButton("🎯 90 хв роботи",   callback_data="pomo|90|20")],
+    ])
+    await update.message.reply_text(
+        "🍅 *Таймер Помодоро*\n\n"
+        "Обери режим роботи:\n"
+        "Після закінчення отримаєш нагадування!",
+        parse_mode="Markdown", reply_markup=kb
+    )
+
+async def pomo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    _, work, rest = q.data.split("|")
+    work, rest = int(work), int(rest)
+    chat_id = q.from_user.id
+    await q.edit_message_text(
+        f"🍅 Таймер запущено!\n\n"
+        f"⏱ Працюй {work} хвилин\n"
+        f"Нагадаю коли час відпочити!"
+    )
+    async def _pomo():
+        await asyncio.sleep(work * 60)
+        await context.bot.send_message(chat_id=chat_id,
+            text=f"🍅 Час вийшов! Відпочинь {rest} хвилин 😌\n/pomodoro — запустити знову")
+    asyncio.create_task(_pomo())
+
+async def nickname_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        style = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "nickname"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎮 Ігровий",    callback_data="nick|gaming"),
+             InlineKeyboardButton("😎 Крутий",     callback_data="nick|cool")],
+            [InlineKeyboardButton("🌙 Містичний",  callback_data="nick|mystic"),
+             InlineKeyboardButton("😂 Смішний",    callback_data="nick|funny")],
+            [InlineKeyboardButton("💪 Сильний",    callback_data="nick|strong"),
+             InlineKeyboardButton("🌸 Милий",      callback_data="nick|cute")],
+        ])
+        await update.message.reply_text("🎮 Обери стиль нікнейму:", reply_markup=kb)
+        return
+
+async def nick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer("Генерую...")
+    style = q.data.split("|")[1]
+    styles = {
+        "gaming": "крутий ігровий нікнейм для стрілялок/RPG",
+        "cool": "стильний і крутий нікнейм для соцмереж",
+        "mystic": "містичний і таємничий нікнейм",
+        "funny": "смішний і мемний нікнейм",
+        "strong": "сильний і потужний нікнейм",
+        "cute": "милий і позитивний нікнейм",
+    }
+    result = ask_ai(q.from_user.id,
+        f"Згенеруй 10 унікальних нікнеймів у стилі '{styles.get(style, style)}'. "
+        f"Тільки список нікнеймів, без пояснень. Кожен з нового рядка.")
+    await q.edit_message_text(f"🎮 Нікнейми ({style}):\n\n{result}")
+
+async def checksite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        url = context.args[0]
+        if not url.startswith("http"):
+            url = "https://" + url
+        try:
+            r = requests.get(url, timeout=8)
+            status = r.status_code
+            if status == 200:
+                await update.message.reply_text(f"✅ Сайт {url} працює! (код {status})")
+            else:
+                await update.message.reply_text(f"⚠️ Сайт відповідає з кодом {status}")
+        except:
+            await update.message.reply_text(f"❌ Сайт {url} недоступний або не існує")
+    else:
+        user_state[update.effective_user.id] = "checksite"
+        await update.message.reply_text("🌐 Введи адресу сайту:\nНаприклад: `google.com`", parse_mode="Markdown")
+
+async def summarize_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        text_to_sum = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "summarize"
+        await update.message.reply_text("📝 Введи текст для резюме (скорочення):")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = ask_ai(update.effective_user.id,
+        f"Зроби коротке резюме цього тексту — 3-5 речень з головною суттю: {text_to_sum}")
+    await update.message.reply_text(f"📝 Резюме:\n\n{result}")
+
+async def synonyms_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        word = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "synonyms"
+        await update.message.reply_text("🔄 Введи слово для пошуку синонімів:")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = ask_ai(update.effective_user.id,
+        f"Дай 10 синонімів до слова '{word}' українською. "
+        f"Тільки список слів через кому, без пояснень.")
+    await update.message.reply_text(f"🔄 Синоніми до '{word}':\n\n{result}")
+
 async def meme_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         topic = " ".join(context.args)
@@ -1805,6 +1917,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "📅 Розклад":
         await schedule_cmd(update, context)
         return
+    if text == "➡️ Сторінка 3":
+        await update.message.reply_text("Сторінка 3:", reply_markup=PAGE3_KB)
+        return
+    if text == "🍅 Помодоро":
+        await pomodoro_cmd(update, context)
+        return
+    if text == "🎮 Нікнейм":
+        await nickname_cmd(update, context)
+        return
+    if text == "🌐 Перевірка сайту":
+        user_state[uid] = "checksite"
+        await update.message.reply_text("🌐 Введи адресу сайту:\nНаприклад: `google.com`", parse_mode="Markdown")
+        return
+    if text == "📝 Резюме тексту":
+        user_state[uid] = "summarize"
+        await update.message.reply_text("📝 Введи текст для скорочення:")
+        return
+    if text == "🔄 Синоніми":
+        user_state[uid] = "synonyms"
+        await update.message.reply_text("🔄 Введи слово для пошуку синонімів:")
+        return
+    if text == "🌍 Країна по IP":
+        await ip_cmd(update, context)
+        return
     if text == "😂 Мем":
         user_state[uid] = "meme"
         await update.message.reply_text("😂 На яку тему мем?\nНаприклад: `школа`, `програмісти`", parse_mode="Markdown")
@@ -1911,6 +2047,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "calc":
         await update.message.reply_text(calculate(text), parse_mode="Markdown")
+        return
+    if state == "checksite":
+        url = text if text.startswith("http") else "https://" + text
+        try:
+            r = requests.get(url, timeout=8)
+            if r.status_code == 200:
+                await update.message.reply_text(f"✅ Сайт {url} працює!")
+            else:
+                await update.message.reply_text(f"⚠️ Код відповіді: {r.status_code}")
+        except:
+            await update.message.reply_text(f"❌ Сайт {url} недоступний")
+        return
+    if state == "summarize":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Зроби коротке резюме 3-5 речень: {text}")
+        await update.message.reply_text(f"📝 Резюме:\n\n{result}")
+        return
+    if state == "synonyms":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Дай 10 синонімів до слова '{text}' українською. Тільки список через кому.")
+        await update.message.reply_text(f"🔄 Синоніми до '{text}':\n\n{result}")
+        return
+    if state == "nickname":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Згенеруй 10 унікальних нікнеймів у стилі '{text}'. Тільки список, кожен з нового рядка.")
+        await update.message.reply_text(f"🎮 Нікнейми:\n\n{result}")
         return
     if state == "meme":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
@@ -2249,6 +2411,8 @@ if __name__ == "__main__":
         ("post", post_cmd), ("idea", idea_cmd), ("expense", expense_cmd), ("quiz", quiz_cmd),
         ("compat", compat_cmd), ("schedule", schedule_cmd),
         ("schedule_add", schedule_add_cmd), ("meme", meme_cmd),
+        ("pomodoro", pomodoro_cmd), ("nickname", nickname_cmd),
+        ("checksite", checksite_cmd), ("summarize", summarize_cmd), ("synonyms", synonyms_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -2269,6 +2433,8 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(quiz_next_callback,   pattern="^quiz_next$"))
     app.add_handler(CallbackQueryHandler(compat1_callback,     pattern="^compat1\\|"))
     app.add_handler(CallbackQueryHandler(compat2_callback,     pattern="^compat2\\|"))
+    app.add_handler(CallbackQueryHandler(pomo_callback,        pattern="^pomo\\|"))
+    app.add_handler(CallbackQueryHandler(nick_callback,        pattern="^nick\\|"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
