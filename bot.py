@@ -127,8 +127,15 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["📝 Нотатки",   "✅ Задачі",    "⏰ Нагадування"],
     ["🧮 Калькулятор","📖 Вікіпедія","🌐 Переклад"],
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
-    ["🎨 Генерація", "📊 Статистика","❓ Допомога"],
-    ["💪 Мотивація"],
+    ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
+    ["💪 Мотивація", "📊 Статистика","❓ Допомога"],
+    ["➡️ Ще функції"],
+], resize_keyboard=True)
+
+PAGE2_KB = ReplyKeyboardMarkup([
+    ["⭐ Купити Преміум", "👥 Реферали"],
+    ["📊 Мій статус",    "🔗 Моє посилання"],
+    ["⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -1088,9 +1095,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await simple[text](update, context)
         return
 
-    if text == "🎨 Генерація":
+    if text == "➡️ Ще функції":
+        await update.message.reply_text("Сторінка 2:", reply_markup=PAGE2_KB)
+        return
+    if text == "⬅️ Назад":
+        await update.message.reply_text("Головне меню:", reply_markup=MAIN_KB)
+        return
+    if text == "⭐ Купити Преміум":
+        await premium_cmd(update, context)
+        return
+    if text == "👥 Реферали":
+        await ref_cmd(update, context)
+        return
+    if text == "🔗 Моє посилання":
+        await ref_cmd(update, context)
+        return
+    if text == "📊 Мій статус":
+        uid2 = update.effective_user.id
+        prem = is_premium(uid2)
+        count = get_ref_count(uid2)
+        if prem:
+            data = load_premium()
+            expires = data.get(str(uid2), {}).get("expires", "")
+            try:
+                exp_str = datetime.fromisoformat(expires).strftime("%d.%m.%Y")
+            except:
+                exp_str = "?"
+            status = f"⭐ Преміум до {exp_str}"
+        else:
+            status = "👤 Звичайний акаунт"
+        await update.message.reply_text(
+            f"📊 *Твій статус*\n\n"
+            f"{status}\n"
+            f"👥 Запрошено друзів: {count}\n\n"
+            f"3 друзі = Преміум 7 днів\n"
+            f"10 друзів = Преміум 30 днів",
+            parse_mode="Markdown"
+        )
+        return
         user_state[uid] = "imagine"
         await update.message.reply_text("🎨 Опиши що намалювати (англійською краще):\nНаприклад: `beautiful sunset over mountains`", parse_mode="Markdown")
+        return
+    if text == "🎵 Музика":
+        user_state[uid] = "music"
+        await update.message.reply_text("🎵 Опиши яку музику згенерувати:\nНаприклад: `relaxing lofi beats`", parse_mode="Markdown")
+        return
+    if text == "⭐ Преміум":
+        await premium_cmd(update, context)
         return
 
     if text == "🔮 Гороскоп":
@@ -1148,6 +1199,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url = generate_image(text)
         await update.message.reply_photo(photo=url, caption=f"🎨 *{text}*", parse_mode="Markdown")
         return
+    if state == "music":
+        import urllib.parse
+        encoded = urllib.parse.quote(text)
+        audio_url = f"https://audio.pollinations.ai/{encoded}"
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_voice")
+        await update.message.reply_text("🎵 Генерую музику, зачекай...")
+        try:
+            r = requests.get(audio_url, timeout=30)
+            if r.status_code == 200 and len(r.content) > 1000:
+                buf = io.BytesIO(r.content)
+                buf.name = "music.mp3"
+                await update.message.reply_audio(audio=buf, title=text[:50], performer="Mark AI")
+            else:
+                raise Exception("empty")
+        except Exception:
+            suno_url = f"https://suno.com/create?prompt={encoded}"
+            await update.message.reply_text(
+                "🎵 Не вдалося згенерувати автоматично. Відкрий Suno:",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🎵 Відкрити Suno", url=suno_url)
+                ]])
+            )
+        return
     if state == "short":
         await update.message.reply_text(shorten_url(text))
         return
@@ -1197,6 +1271,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply = ask_ai(uid, text)
     save_dialog(uid, "assistant", reply)
     await update.message.reply_text(reply)
+
+async def music_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        prompt = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "music"
+        await update.message.reply_text(
+            "🎵 Опиши яку музику згенерувати:\n"
+            "Наприклад: `relaxing lofi hip hop beats` або `epic orchestral battle music`",
+            parse_mode="Markdown"
+        )
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_voice")
+    await update.message.reply_text("🎵 Генерую музику, зачекай...")
+    import urllib.parse
+    encoded = urllib.parse.quote(prompt)
+    audio_url = f"https://audio.pollinations.ai/{encoded}"
+    try:
+        r = requests.get(audio_url, timeout=30)
+        if r.status_code == 200 and len(r.content) > 1000:
+            buf = io.BytesIO(r.content)
+            buf.name = "music.mp3"
+            await update.message.reply_audio(audio=buf, title=prompt[:50], performer="Mark AI")
+        else:
+            raise Exception("empty response")
+    except Exception:
+        # Запасний варіант — посилання на Suno
+        suno_url = f"https://suno.com/create?prompt={encoded}"
+        await update.message.reply_text(
+            f"🎵 Не вдалося згенерувати автоматично.\nВідкрий Suno і натисни Create:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🎵 Відкрити Suno", url=suno_url)
+            ]])
+        )
 
 async def imagine_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
@@ -1327,6 +1436,7 @@ if __name__ == "__main__":
         ("stats", stats_cmd), ("clear", clear_cmd),
         ("guess", guess_cmd), ("dice", dice_cmd), ("coin", coin_cmd),
         ("imagine", imagine_cmd), ("ref", ref_cmd), ("premium", premium_cmd),
+        ("music", music_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
