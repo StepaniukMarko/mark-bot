@@ -132,7 +132,7 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
     ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
     ["🍽 Калорії",   "📊 Статистика","❓ Допомога"],
-    ["💪 Мотивація", "➡️ Ще функції"],
+    ["💪 Мотивація", "💻 Код",       "➡️ Ще функції"],
 ], resize_keyboard=True)
 
 PAGE2_KB = ReplyKeyboardMarkup([
@@ -148,7 +148,7 @@ PAGE2_KB = ReplyKeyboardMarkup([
 PAGE3_KB = ReplyKeyboardMarkup([
     ["🍅 Помодоро",      "🎮 Нікнейм",    "🌐 Перевірка сайту"],
     ["📝 Резюме тексту", "🔄 Синоніми",   "🌍 Країна по IP"],
-    ["⬅️ Назад"],
+    ["🧠 Моя пам'ять",   "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -1287,6 +1287,43 @@ async def checksite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_state[update.effective_user.id] = "checksite"
         await update.message.reply_text("🌐 Введи адресу сайту:\nНаприклад: `google.com`", parse_mode="Markdown")
 
+async def code_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        # /code python зроби парсер сайту
+        task = " ".join(context.args)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Ти — досвідчений програміст. Напиши код: {task}\n"
+            f"Поясни коротко що робить код і як запустити."
+        )
+        await update.message.reply_text(result)
+    else:
+        user_state[uid] = "code"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Python",     callback_data="code|Python"),
+             InlineKeyboardButton("JavaScript", callback_data="code|JavaScript")],
+            [InlineKeyboardButton("HTML/CSS",   callback_data="code|HTML/CSS"),
+             InlineKeyboardButton("SQL",        callback_data="code|SQL")],
+            [InlineKeyboardButton("TypeScript", callback_data="code|TypeScript"),
+             InlineKeyboardButton("Bash",       callback_data="code|Bash")],
+            [InlineKeyboardButton("Java",       callback_data="code|Java"),
+             InlineKeyboardButton("C#",         callback_data="code|C#")],
+            [InlineKeyboardButton("Будь-яка",   callback_data="code|будь-якою мовою")],
+        ])
+        await update.message.reply_text(
+            "💻 Обери мову програмування або просто опиши задачу:",
+            reply_markup=kb
+        )
+
+async def code_lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = query.data.split("|", 1)[1]
+    uid = query.from_user.id
+    user_state[uid] = f"code_{lang}"
+    await query.edit_message_text(f"💻 {lang} — опиши що потрібно написати:")
+
 async def memory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     mem = load_memory(uid)
@@ -2167,7 +2204,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await food_cmd(update, context)
         return
 
-    if text == "🔮 Гороскоп":
+    if text == "� Код":
+        await code_cmd(update, context)
+        return
+
+    if text == "🧠 Моя пам'ять":
+        await memory_cmd(update, context)
+        return
+
+    if text == "�🔮 Гороскоп":
         await horoscope_cmd(update, context)
         return
     if text == "₿ Крипта":
@@ -2224,6 +2269,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         result = ask_ai(uid, f"Дай інформацію про страву '{text}': 1) Калорії на 100г і на порцію 2) Основні інгредієнти 3) КБЖУ (білки/жири/вуглеводи) 4) Чи корисна ця страва. Відповідай структуровано.")
         await update.message.reply_text(f"🍽 {text}:\n\n{result}")
+        return
+    if state == "code":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Ти — досвідчений програміст. Напиши код будь-якою підходящою мовою: {text}\nПоясни коротко що робить код і як запустити.")
+        await update.message.reply_text(result)
+        return
+    if state and state.startswith("code_"):
+        lang = state[5:]
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Ти — досвідчений програміст. Напиши код на {lang}: {text}\nПоясни коротко що робить код і як запустити.")
+        await update.message.reply_text(result)
         return
     if state == "summarize":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -2584,6 +2640,7 @@ if __name__ == "__main__":
         ("pomodoro", pomodoro_cmd), ("nickname", nickname_cmd),
         ("checksite", checksite_cmd), ("summarize", summarize_cmd), ("synonyms", synonyms_cmd),
         ("food", food_cmd), ("memory", memory_cmd), ("forget", forget_cmd),
+        ("code", code_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -2606,6 +2663,7 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(compat2_callback,     pattern="^compat2\\|"))
     app.add_handler(CallbackQueryHandler(pomo_callback,        pattern="^pomo\\|"))
     app.add_handler(CallbackQueryHandler(nick_callback,        pattern="^nick\\|"))
+    app.add_handler(CallbackQueryHandler(code_lang_callback,   pattern="^code\\|"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
