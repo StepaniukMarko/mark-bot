@@ -31,6 +31,7 @@ TASKS_FILE     = "tasks_tg.json"
 USERS_FILE     = "users_tg.json"
 REFS_FILE      = "refs_tg.json"
 PREMIUM_FILE   = "premium_tg.json"
+MEMORY_FILE    = "memory_tg.json"
 ADMIN_ID       = 1780948739
 
 logging.basicConfig(
@@ -208,6 +209,10 @@ def ask_ai(user_id: int, message: str) -> str:
         "Відповідай ВИКЛЮЧНО українською мовою",
         lang_instruction
     )
+    # Додаємо пам'ять про користувача
+    mem_text = memory_to_text(load_memory(user_id))
+    if mem_text:
+        system += f"\n\nЩо ти знаєш про цього користувача:\n{mem_text}\nВикористовуй цю інформацію щоб відповіді були персоналізованими."
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "llama-3.3-70b-versatile",
@@ -222,6 +227,8 @@ def ask_ai(user_id: int, message: str) -> str:
         history.append({"role": "assistant", "content": reply})
         if len(history) > 40:
             user_histories[user_id] = history[-40:]
+        # Витягуємо факти з розмови у фоні
+        extract_and_update_memory(user_id, message, reply)
         return clean_ai_text(reply)
     except Exception as e:
         return f"😴 AI тимчасово недоступний. Спробуй ще раз! ({e})"
@@ -717,6 +724,93 @@ def check_ref_rewards(user_id: int) -> str:
         msg = "🎉 3 друзі! Преміум на 7 днів активовано!"
     return msg
 
+# ══════════════════════════════════════
+#  ПАМ'ЯТЬ БОТА
+# ══════════════════════════════════════
+def load_memory(user_id: int) -> dict:
+    if not os.path.exists(MEMORY_FILE):
+        return {}
+    try:
+        data = json.load(open(MEMORY_FILE, "r", encoding="utf-8"))
+        return data.get(str(user_id), {})
+    except:
+        return {}
+
+def save_memory(user_id: int, mem: dict):
+    data = {}
+    if os.path.exists(MEMORY_FILE):
+        try:
+            data = json.load(open(MEMORY_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    data[str(user_id)] = mem
+    json.dump(data, open(MEMORY_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+def memory_to_text(mem: dict) -> str:
+    """Перетворює словник пам'яті в текст для системного промпту"""
+    if not mem:
+        return ""
+    lines = []
+    if mem.get("name"):
+        lines.append(f"Ім'я користувача: {mem['name']}")
+    if mem.get("city"):
+        lines.append(f"Місто: {mem['city']}")
+    if mem.get("age"):
+        lines.append(f"Вік: {mem['age']}")
+    if mem.get("occupation"):
+        lines.append(f"Робота/навчання: {mem['occupation']}")
+    if mem.get("interests"):
+        lines.append(f"Інтереси: {', '.join(mem['interests'])}")
+    if mem.get("facts"):
+        lines.append(f"Відомі факти: {'; '.join(mem['facts'][-5:])}")
+    return "\n".join(lines)
+
+def extract_and_update_memory(user_id: int, user_message: str, ai_reply: str):
+    """Витягує факти з розмови і оновлює пам'ять асинхронно"""
+    import threading
+    def _extract():
+        try:
+            mem = load_memory(user_id)
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+            prompt = (
+                f"З цього повідомлення користувача витягни факти про нього для запам'ятовування.\n"
+                f"Повідомлення: \"{user_message}\"\n\n"
+                f"Поточна пам'ять: {json.dumps(mem, ensure_ascii=False)}\n\n"
+                f"Поверни JSON з полями (тільки якщо є нова інформація, інакше поверни {{}}): "
+                f"name (ім'я), city (місто), age (вік як число), occupation (робота/навчання), "
+                f"interests (список інтересів), facts (список коротких фактів).\n"
+                f"Відповідай ТІЛЬКИ валідним JSON без пояснень."
+            )
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 300, "temperature": 0
+            }
+            r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=10)
+            raw = r.json()["choices"][0]["message"]["content"].strip()
+            # Витягуємо JSON з відповіді
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start >= 0 and end > start:
+                new_data = json.loads(raw[start:end])
+                if new_data:
+                    # Мержимо з існуючою пам'яттю
+                    for key in ["name", "city", "age", "occupation"]:
+                        if new_data.get(key):
+                            mem[key] = new_data[key]
+                    # Списки — додаємо нові елементи
+                    for key in ["interests", "facts"]:
+                        if new_data.get(key):
+                            existing = mem.get(key, [])
+                            for item in new_data[key]:
+                                if item not in existing:
+                                    existing.append(item)
+                            mem[key] = existing[-10:]  # зберігаємо останні 10
+                    save_memory(user_id, mem)
+        except:
+            pass
+    threading.Thread(target=_extract, daemon=True).start()
+
 async def password_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     length = 16
     if context.args:
@@ -1192,6 +1286,34 @@ async def checksite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         user_state[update.effective_user.id] = "checksite"
         await update.message.reply_text("🌐 Введи адресу сайту:\nНаприклад: `google.com`", parse_mode="Markdown")
+
+async def memory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    mem = load_memory(uid)
+    if not mem:
+        await update.message.reply_text(
+            "Я поки нічого не знаю про тебе.\n\n"
+            "Просто спілкуйся зі мною — я автоматично запам'ятовую важливі деталі з розмови!"
+        )
+        return
+    lines = ["Ось що я про тебе знаю:\n"]
+    if mem.get("name"):      lines.append(f"Ім'я: {mem['name']}")
+    if mem.get("city"):      lines.append(f"Місто: {mem['city']}")
+    if mem.get("age"):       lines.append(f"Вік: {mem['age']}")
+    if mem.get("occupation"):lines.append(f"Робота/навчання: {mem['occupation']}")
+    if mem.get("interests"):
+        lines.append(f"Інтереси: {', '.join(mem['interests'])}")
+    if mem.get("facts"):
+        lines.append("\nЗапам'ятовані факти:")
+        for f in mem["facts"][-7:]:
+            lines.append(f"- {f}")
+    lines.append("\n/forget — щоб очистити пам'ять")
+    await update.message.reply_text("\n".join(lines))
+
+async def forget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    save_memory(uid, {})
+    await update.message.reply_text("Пам'ять очищена. Починаємо з чистого аркуша!")
 
 async def food_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -2461,7 +2583,7 @@ if __name__ == "__main__":
         ("schedule_add", schedule_add_cmd), ("meme", meme_cmd),
         ("pomodoro", pomodoro_cmd), ("nickname", nickname_cmd),
         ("checksite", checksite_cmd), ("summarize", summarize_cmd), ("synonyms", synonyms_cmd),
-        ("food", food_cmd),
+        ("food", food_cmd), ("memory", memory_cmd), ("forget", forget_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
