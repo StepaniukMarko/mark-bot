@@ -149,7 +149,8 @@ PAGE2_KB = ReplyKeyboardMarkup([
     ["🔐 Пароль",        "🎭 Настрій",    "📐 Конвертер"],
     ["🌐 Мова AI",       "📋 Шпаргалка",  "✍️ Граматика"],
     ["📱 Пост",          "💡 Бізнес-ідея","💰 Витрати"],
-    ["🧠 Вікторина",     "⬅️ Назад"],
+    ["🧠 Вікторина",     "💑 Сумісність", "😂 Мем"],
+    ["📅 Розклад",       "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -991,6 +992,130 @@ async def quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=kb
     )
 
+async def compat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Гороскоп сумісності двох знаків"""
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("♈ Овен",    callback_data="compat1|овен"),
+         InlineKeyboardButton("♉ Телець",  callback_data="compat1|телець"),
+         InlineKeyboardButton("♊ Близнюки",callback_data="compat1|близнюки")],
+        [InlineKeyboardButton("♋ Рак",     callback_data="compat1|рак"),
+         InlineKeyboardButton("♌ Лев",     callback_data="compat1|лев"),
+         InlineKeyboardButton("♍ Діва",    callback_data="compat1|діва")],
+        [InlineKeyboardButton("♎ Терези",  callback_data="compat1|терези"),
+         InlineKeyboardButton("♏ Скорпіон",callback_data="compat1|скорпіон"),
+         InlineKeyboardButton("♐ Стрілець",callback_data="compat1|стрілець")],
+        [InlineKeyboardButton("♑ Козеріг", callback_data="compat1|козеріг"),
+         InlineKeyboardButton("♒ Водолій", callback_data="compat1|водолій"),
+         InlineKeyboardButton("♓ Риби",    callback_data="compat1|риби")],
+    ])
+    await update.message.reply_text("💑 Обери свій знак зодіаку:", reply_markup=kb)
+
+async def compat1_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    sign1 = q.data.split("|")[1]
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("♈ Овен",    callback_data=f"compat2|{sign1}|овен"),
+         InlineKeyboardButton("♉ Телець",  callback_data=f"compat2|{sign1}|телець"),
+         InlineKeyboardButton("♊ Близнюки",callback_data=f"compat2|{sign1}|близнюки")],
+        [InlineKeyboardButton("♋ Рак",     callback_data=f"compat2|{sign1}|рак"),
+         InlineKeyboardButton("♌ Лев",     callback_data=f"compat2|{sign1}|лев"),
+         InlineKeyboardButton("♍ Діва",    callback_data=f"compat2|{sign1}|діва")],
+        [InlineKeyboardButton("♎ Терези",  callback_data=f"compat2|{sign1}|терези"),
+         InlineKeyboardButton("♏ Скорпіон",callback_data=f"compat2|{sign1}|скорпіон"),
+         InlineKeyboardButton("♐ Стрілець",callback_data=f"compat2|{sign1}|стрілець")],
+        [InlineKeyboardButton("♑ Козеріг", callback_data=f"compat2|{sign1}|козеріг"),
+         InlineKeyboardButton("♒ Водолій", callback_data=f"compat2|{sign1}|водолій"),
+         InlineKeyboardButton("♓ Риби",    callback_data=f"compat2|{sign1}|риби")],
+    ])
+    await q.edit_message_text(f"Твій знак: {sign1}\nТепер обери знак партнера:", reply_markup=kb)
+
+async def compat2_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer("Аналізую сумісність...")
+    _, sign1, sign2 = q.data.split("|")
+    result = ask_ai(q.from_user.id,
+        f"Проаналізуй сумісність знаків зодіаку {sign1} і {sign2}. "
+        f"Дай: відсоток сумісності, сильні сторони пари, слабкі сторони, загальний висновок. "
+        f"Відповідь цікава і жива.")
+    await q.edit_message_text(f"💑 Сумісність {sign1} + {sign2}\n\n{result}")
+
+SCHEDULE_FILE = "schedule_tg.json"
+
+def load_schedule(user_id: int) -> dict:
+    if os.path.exists(SCHEDULE_FILE):
+        try:
+            data = json.load(open(SCHEDULE_FILE, "r", encoding="utf-8"))
+            return data.get(str(user_id), {})
+        except:
+            pass
+    return {}
+
+def save_schedule(user_id: int, schedule: dict):
+    data = {}
+    if os.path.exists(SCHEDULE_FILE):
+        try:
+            data = json.load(open(SCHEDULE_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    data[str(user_id)] = schedule
+    json.dump(data, open(SCHEDULE_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+async def schedule_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    schedule = load_schedule(uid)
+    days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]
+    if not schedule:
+        await update.message.reply_text(
+            "📅 Розклад порожній.\n\n"
+            "Додай урок командою:\n"
+            "`/schedule_add Пн 08:00 Математика`\n\n"
+            "Або напиши весь розклад:\n"
+            "`/schedule_set Пн: Математика 08:00, Фізика 09:45`",
+            parse_mode="Markdown"
+        )
+        return
+    lines = []
+    for day in days:
+        if day in schedule:
+            lessons = schedule[day]
+            lines.append(f"*{day}:*\n" + "\n".join(f"  {l}" for l in lessons))
+    await update.message.reply_text("📅 Твій розклад:\n\n" + "\n\n".join(lines), parse_mode="Markdown")
+
+async def schedule_add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) >= 3:
+        day = context.args[0]
+        time = context.args[1]
+        subject = " ".join(context.args[2:])
+        uid = update.effective_user.id
+        schedule = load_schedule(uid)
+        if day not in schedule:
+            schedule[day] = []
+        schedule[day].append(f"{time} — {subject}")
+        schedule[day].sort()
+        save_schedule(uid, schedule)
+        await update.message.reply_text(f"✅ Додано: {day} {time} — {subject}")
+    else:
+        await update.message.reply_text("❌ Формат: /schedule_add Пн 08:00 Математика")
+
+async def meme_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        topic = " ".join(context.args)
+    else:
+        user_state[update.effective_user.id] = "meme"
+        await update.message.reply_text("😂 На яку тему мем?\nНаприклад: `школа`, `програмісти`, `понеділок`")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+    import urllib.parse
+    # Генеруємо мем через Pollinations з мемним стилем
+    meme_prompt = f"funny meme about {topic}, internet meme style, bold text, white background, humorous"
+    encoded = urllib.parse.quote(meme_prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=800&nologo=true"
+    try:
+        await update.message.reply_photo(photo=url, caption=f"😂 Мем про: {topic}")
+    except:
+        await update.message.reply_text("😕 Не вдалося згенерувати мем. Спробуй ще раз.")
+
 async def quiz_next_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -1674,6 +1799,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🧠 Вікторина":
         await quiz_cmd(update, context)
         return
+    if text == "💑 Сумісність":
+        await compat_cmd(update, context)
+        return
+    if text == "📅 Розклад":
+        await schedule_cmd(update, context)
+        return
+    if text == "😂 Мем":
+        user_state[uid] = "meme"
+        await update.message.reply_text("😂 На яку тему мем?\nНаприклад: `школа`, `програмісти`", parse_mode="Markdown")
+        return
     if text == "➡️ Ще функції":
         await update.message.reply_text("Сторінка 2:", reply_markup=PAGE2_KB)
         return
@@ -1776,6 +1911,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "calc":
         await update.message.reply_text(calculate(text), parse_mode="Markdown")
+        return
+    if state == "meme":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        import urllib.parse
+        meme_prompt = f"funny meme about {text}, internet meme style, bold text, humorous"
+        encoded = urllib.parse.quote(meme_prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=800&nologo=true"
+        try:
+            await update.message.reply_photo(photo=url, caption=f"😂 Мем про: {text}")
+        except:
+            await update.message.reply_text("😕 Не вдалося згенерувати мем.")
         return
     if state == "cheatsheet":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -2101,6 +2247,8 @@ if __name__ == "__main__":
         ("password", password_cmd), ("mood", mood_cmd), ("convert", convert_cmd),
         ("search", search_cmd), ("cheatsheet", cheatsheet_cmd), ("grammar", grammar_cmd),
         ("post", post_cmd), ("idea", idea_cmd), ("expense", expense_cmd), ("quiz", quiz_cmd),
+        ("compat", compat_cmd), ("schedule", schedule_cmd),
+        ("schedule_add", schedule_add_cmd), ("meme", meme_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -2119,6 +2267,8 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(exp_clear_callback,   pattern="^exp_clear\\|"))
     app.add_handler(CallbackQueryHandler(quiz_callback,        pattern="^quiz\\|\\d"))
     app.add_handler(CallbackQueryHandler(quiz_next_callback,   pattern="^quiz_next$"))
+    app.add_handler(CallbackQueryHandler(compat1_callback,     pattern="^compat1\\|"))
+    app.add_handler(CallbackQueryHandler(compat2_callback,     pattern="^compat2\\|"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
