@@ -1225,16 +1225,34 @@ async def meme_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_state[update.effective_user.id] = "meme"
         await update.message.reply_text("😂 На яку тему мем?\nНаприклад: `школа`, `програмісти`, `понеділок`")
         return
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-    import urllib.parse
-    # Генеруємо мем через Pollinations з мемним стилем
-    meme_prompt = f"funny meme about {topic}, internet meme style, bold text, white background, humorous"
-    encoded = urllib.parse.quote(meme_prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=800&nologo=true"
-    try:
-        await update.message.reply_photo(photo=url, caption=f"😂 Мем про: {topic}")
-    except:
-        await update.message.reply_text("😕 Не вдалося згенерувати мем. Спробуй ще раз.")
+    await _generate_meme(update, topic)
+
+async def _generate_meme(update: Update, topic: str):
+    await update.message.reply_text("😂 Генерую мем...")
+    import urllib.parse, time
+    prompts = [
+        f"funny meme image about {topic}, white background, simple cartoon style, humorous",
+        f"internet meme about {topic}, funny, bold caption text, simple drawing",
+        f"comic meme {topic}, funny illustration, minimal style",
+    ]
+    for prompt in prompts:
+        try:
+            encoded = urllib.parse.quote(prompt)
+            seed = random.randint(1, 99999)
+            url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=800&nologo=true&seed={seed}"
+            r = requests.get(url, timeout=20)
+            if r.status_code == 200 and len(r.content) > 5000:
+                buf = io.BytesIO(r.content)
+                buf.name = "meme.jpg"
+                await update.message.reply_photo(photo=buf, caption=f"😂 Мем про: {topic}")
+                return
+        except:
+            continue
+    # Якщо картинка не вийшла — текстовий мем через AI
+    result = ask_ai(update.effective_user.id,
+        f"Придумай смішний текстовий мем про '{topic}'. "
+        f"Формат: верхній текст / нижній текст. Коротко і смішно.")
+    await update.message.reply_text(f"😂 Мем про {topic}:\n\n{result}")
 
 async def quiz_next_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -2083,15 +2101,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🎮 Нікнейми:\n\n{result}")
         return
     if state == "meme":
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-        import urllib.parse
-        meme_prompt = f"funny meme about {text}, internet meme style, bold text, humorous"
-        encoded = urllib.parse.quote(meme_prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=800&nologo=true"
-        try:
-            await update.message.reply_photo(photo=url, caption=f"😂 Мем про: {text}")
-        except:
-            await update.message.reply_text("😕 Не вдалося згенерувати мем.")
+        await _generate_meme(update, text)
         return
     if state == "cheatsheet":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
