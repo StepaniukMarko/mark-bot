@@ -130,7 +130,7 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["🧮 Калькулятор","📖 Вікіпедія","🌐 Переклад"],
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
     ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
-    ["� Пошук",     "📊 Статистика","❓ Допомога"],
+    ["🍽 Калорії",   "📊 Статистика","❓ Допомога"],
     ["💪 Мотивація", "➡️ Ще функції"],
 ], resize_keyboard=True)
 
@@ -1193,6 +1193,15 @@ async def checksite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_state[update.effective_user.id] = "checksite"
         await update.message.reply_text("🌐 Введи адресу сайту:\nНаприклад: `google.com`", parse_mode="Markdown")
 
+async def food_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "food_photo"
+    await update.message.reply_text(
+        "🍽 Надішли фото страви, і я визначу калорії та склад!\n\n"
+        "Або напиши назву страви, наприклад: `борщ`, `піца маргарита`",
+        parse_mode="Markdown"
+    )
+
 async def summarize_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         text_to_sum = " ".join(context.args)
@@ -2032,6 +2041,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if text == "🍽 Калорії":
+        await food_cmd(update, context)
+        return
+
     if text == "🔮 Гороскоп":
         await horoscope_cmd(update, context)
         return
@@ -2084,6 +2097,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"⚠️ Код відповіді: {r.status_code}")
         except:
             await update.message.reply_text(f"❌ Сайт {url} недоступний")
+        return
+    if state == "food_photo":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"Дай інформацію про страву '{text}': 1) Калорії на 100г і на порцію 2) Основні інгредієнти 3) КБЖУ (білки/жири/вуглеводи) 4) Чи корисна ця страва. Відповідай структуровано.")
+        await update.message.reply_text(f"🍽 {text}:\n\n{result}")
         return
     if state == "summarize":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -2309,15 +2327,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-    # Отримуємо файл
-    photo = update.message.photo[-1]  # найбільша якість
+    photo = update.message.photo[-1]
     file = await context.bot.get_file(photo.file_id)
     image_url = file.file_path
 
-    question = update.message.caption or ""
-    await update.message.reply_text("🔍 Аналізую зображення...")
-    result = analyze_image(image_url, question)
-    await update.message.reply_text(f"🖼 Аналіз зображення:\n\n{result}")
+    caption = (update.message.caption or "").lower()
+    is_food = user_state.get(uid) == "food_photo" or any(
+        w in caption for w in ["їжа", "страва", "калорії", "food", "calories", "рецепт"]
+    )
+
+    if is_food:
+        user_state.pop(uid, None)
+        await update.message.reply_text("🍽 Аналізую страву...")
+        result = analyze_image(
+            image_url,
+            "Це фото їжі. Визнач: 1) Назву страви 2) Приблизні калорії на порцію 3) Основні інгредієнти 4) Білки/жири/вуглеводи (КБЖУ). Відповідай чітко і структуровано."
+        )
+        await update.message.reply_text(f"🍽 Аналіз страви:\n\n{result}")
+    else:
+        await update.message.reply_text("🔍 Аналізую зображення...")
+        result = analyze_image(image_url, update.message.caption or "")
+        await update.message.reply_text(f"🖼 Аналіз зображення:\n\n{result}")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Читає PDF та текстові файли і аналізує через AI"""
@@ -2431,6 +2461,7 @@ if __name__ == "__main__":
         ("schedule_add", schedule_add_cmd), ("meme", meme_cmd),
         ("pomodoro", pomodoro_cmd), ("nickname", nickname_cmd),
         ("checksite", checksite_cmd), ("summarize", summarize_cmd), ("synonyms", synonyms_cmd),
+        ("food", food_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
