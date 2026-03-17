@@ -877,13 +877,13 @@ async def ref_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         next_reward = f"\n🎯 До преміуму на 30 днів: ще {10 - count} друзів"
 
     await update.message.reply_text(
-        f"👥 *Реферальна система*\n\n"
+        f"<b>👥 Реферальна система</b>\n\n"
         f"Твоє посилання:\n{link}\n\n"
-        f"Запрошено друзів: *{count}*\n"
+        f"Запрошено друзів: <b>{count}</b>\n"
         f"{prem_text}{next_reward}\n\n"
         f"3 друзі = Преміум 7 днів\n"
         f"10 друзів = Преміум 30 днів",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 def save_note(text: str):
