@@ -1917,14 +1917,41 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     done  = sum(1 for t in tasks if t["done"])
     notes = len([l for l in read_notes().split("\n") if l.strip() and "порожні" not in l])
     mem   = len(user_histories.get(uid, []))
-    await update.message.reply_text(
-        f"📊 *Статистика {name}:*\n\n"
+
+    text = (
+        f"📊 Статистика {name}:\n\n"
         f"💬 Повідомлень до AI: {msgs}\n"
         f"✅ Задач виконано: {done}/{len(tasks)}\n"
         f"📝 Нотаток: {notes}\n"
-        f"🧠 Повідомлень у пам'яті: {mem}/40",
-        parse_mode="Markdown"
+        f"🧠 Повідомлень у пам'яті: {mem}/40"
     )
+
+    # Адмін бачить загальну статистику
+    if uid == ADMIN_ID:
+        try:
+            users = json.load(open(USERS_FILE, "r", encoding="utf-8")) if os.path.exists(USERS_FILE) else {}
+            total_users = len(users)
+            today = datetime.now().strftime("%Y-%m-%d")
+            today_msgs = 0
+            week_msgs = 0
+            if os.path.exists(DIALOG_FILE):
+                history = json.load(open(DIALOG_FILE, "r", encoding="utf-8"))
+                today_msgs = sum(1 for e in history if e.get("role") == "user" and e.get("date", "").startswith(today))
+                from datetime import timedelta
+                week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                week_msgs = sum(1 for e in history if e.get("role") == "user" and e.get("date", "") >= week_ago)
+            active_now = len(user_histories)
+            text += (
+                f"\n\n👑 Адмін-статистика:\n"
+                f"👥 Всього користувачів: {total_users}\n"
+                f"📨 Повідомлень сьогодні: {today_msgs}\n"
+                f"📊 За тиждень: {week_msgs}\n"
+                f"🟢 Активних зараз: {active_now}"
+            )
+        except:
+            pass
+
+    await update.message.reply_text(text)
 
 async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_histories[update.effective_user.id] = []
@@ -2451,6 +2478,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- AI відповідь ---
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     save_dialog(uid, "user", text)
+
+    # Підказка якщо схоже на команду кнопки
+    button_hints = {
+        "погода": "🌤 Натисни кнопку Погода або напиши /weather місто",
+        "новини": "📰 Натисни кнопку Новини або /news",
+        "валюта": "💱 Натисни кнопку Валюта або напиши: 100 USD UAH",
+        "переклад": "🌐 Натисни кнопку Переклад або /translate текст",
+        "калькулятор": "🧮 Натисни кнопку Калькулятор або /calc вираз",
+        "нотатки": "📝 Натисни кнопку Нотатки або /notes",
+        "задачі": "✅ Натисни кнопку Задачі або /tasks",
+        "крипта": "₿ Натисни кнопку Крипта або /crypto",
+        "гороскоп": "🔮 Натисни кнопку Гороскоп або /horoscope",
+    }
+    text_lower = text.lower()
+    for keyword, hint in button_hints.items():
+        if text_lower == keyword:
+            await update.message.reply_text(hint)
+            return
+
     reply = ask_ai(uid, text)
     save_dialog(uid, "assistant", reply)
     await update.message.reply_text(reply)
