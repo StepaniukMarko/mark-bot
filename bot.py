@@ -1436,6 +1436,47 @@ async def quiz_next_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
+async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує список всіх користувачів — тільки для адміна"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Немає доступу.")
+        return
+    users = {}
+    if os.path.exists(USERS_FILE):
+        try:
+            users = json.load(open(USERS_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    msg_counts = {}
+    last_seen = {}
+    if os.path.exists(DIALOG_FILE):
+        try:
+            history = json.load(open(DIALOG_FILE, "r", encoding="utf-8"))
+            for e in history:
+                if e.get("role") == "user":
+                    uid_str = str(e.get("user_id", ""))
+                    msg_counts[uid_str] = msg_counts.get(uid_str, 0) + 1
+                    date = e.get("date", "")
+                    if date > last_seen.get(uid_str, ""):
+                        last_seen[uid_str] = date
+        except:
+            pass
+    sorted_users = sorted(users.items(), key=lambda x: msg_counts.get(x[0], 0), reverse=True)
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_active = sum(1 for uid_str in last_seen if last_seen[uid_str].startswith(today))
+    lines = [f"👥 Всього: {len(users)} | Сьогодні активних: {today_active}\n"]
+    for i, (uid_str, v) in enumerate(sorted_users[:50]):
+        name = v.get("name", "?")
+        username = f"@{v.get('username')}" if v.get("username") else "без @"
+        msgs = msg_counts.get(uid_str, 0)
+        seen = last_seen.get(uid_str, v.get("joined", "?"))[:10]
+        prem = "⭐" if is_premium(int(uid_str)) else ""
+        lines.append(f"{i+1}. {prem}{name} ({username}) — {msgs} повід., {seen}")
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n..."
+    await update.message.reply_text(text)
+
 async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Немає доступу.")
@@ -1483,10 +1524,36 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 users = json.load(open(USERS_FILE, "r", encoding="utf-8"))
             except:
                 pass
-        lines = [f"{i+1}. {v.get('name','')} (@{v.get('username','?')}) — {v.get('joined','')}"
-                 for i, (k, v) in enumerate(list(users.items())[:30])]
-        text = "\n".join(lines) if lines else "Порожньо"
-        await q.edit_message_text(f"👥 *Користувачі:*\n\n{text}", parse_mode="Markdown")
+        # Рахуємо повідомлення кожного юзера
+        msg_counts = {}
+        last_seen = {}
+        if os.path.exists(DIALOG_FILE):
+            try:
+                history = json.load(open(DIALOG_FILE, "r", encoding="utf-8"))
+                for e in history:
+                    if e.get("role") == "user":
+                        uid_str = str(e.get("user_id", ""))
+                        msg_counts[uid_str] = msg_counts.get(uid_str, 0) + 1
+                        date = e.get("date", "")
+                        if date > last_seen.get(uid_str, ""):
+                            last_seen[uid_str] = date
+            except:
+                pass
+        # Сортуємо по кількості повідомлень
+        sorted_users = sorted(users.items(), key=lambda x: msg_counts.get(x[0], 0), reverse=True)
+        lines = []
+        for i, (uid_str, v) in enumerate(sorted_users[:50]):
+            name = v.get("name", "?")
+            username = f"@{v.get('username')}" if v.get("username") else "без username"
+            msgs = msg_counts.get(uid_str, 0)
+            seen = last_seen.get(uid_str, v.get("joined", "?"))[:10]
+            prem = "⭐" if is_premium(int(uid_str)) else ""
+            lines.append(f"{i+1}. {prem}{name} ({username})\n   💬 {msgs} повід. | {seen}")
+        text = "\n\n".join(lines) if lines else "Порожньо"
+        # Розбиваємо якщо довго
+        if len(text) > 3500:
+            text = text[:3500] + "\n..."
+        await q.edit_message_text(f"👥 Користувачі ({len(users)}):\n\n{text}")
 
 async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -2686,7 +2753,7 @@ if __name__ == "__main__":
         ("pomodoro", pomodoro_cmd), ("nickname", nickname_cmd),
         ("checksite", checksite_cmd), ("summarize", summarize_cmd), ("synonyms", synonyms_cmd),
         ("food", food_cmd), ("memory", memory_cmd), ("forget", forget_cmd),
-        ("code", code_cmd),
+        ("code", code_cmd), ("users", users_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
