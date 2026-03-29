@@ -152,13 +152,14 @@ PAGE2_KB = ReplyKeyboardMarkup([
     ["🌐 Мова AI",       "📋 Шпаргалка",  "✍️ Граматика"],
     ["📱 Пост",          "💡 Бізнес-ідея","💰 Витрати"],
     ["🧠 Вікторина",     "💑 Сумісність", "😂 Мем"],
-    ["📅 Розклад",       "➡️ Сторінка 3", "⬅️ Назад"],
+    ["📅 Розклад",       "🏆 Лідерборд",  "➡️ Сторінка 3", "⬅️ Назад"],
 ], resize_keyboard=True)
 
 PAGE3_KB = ReplyKeyboardMarkup([
     ["🍅 Помодоро",      "🎮 Нікнейм",    "🌐 Перевірка сайту"],
     ["📝 Резюме тексту", "🔄 Синоніми",   "🌍 Країна по IP"],
     ["🧠 Моя пам'ять",   "🔬 Глибокий аналіз", "⬅️ Назад"],
+    ["🔗 Аналіз сайту",  "🎭 Дебати",          "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -345,7 +346,8 @@ def register_user(user):
         except:
             pass
     uid = str(user.id)
-    if uid not in users:
+    is_new = uid not in users
+    if is_new:
         users[uid] = {
             "name": user.first_name,
             "username": user.username,
@@ -353,6 +355,7 @@ def register_user(user):
         }
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(users, f, ensure_ascii=False, indent=2)
+    return is_new
 
 # ══════════════════════════════════════
 #  УТИЛІТИ
@@ -692,6 +695,52 @@ def shorten_url(url: str) -> str:
         return "❌ Не вдалося скоротити посилання."
     except:
         return "❌ Помилка скорочення посилання."
+
+# ══════════════════════════════════════
+#  ЛІМІТ ПОВІДОМЛЕНЬ
+# ══════════════════════════════════════
+FREE_DAILY_LIMIT = 20
+
+def count_today_messages(user_id: int) -> int:
+    if not os.path.exists(DIALOG_FILE):
+        return 0
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        h = json.load(open(DIALOG_FILE, "r", encoding="utf-8"))
+        return sum(1 for e in h
+                   if e.get("user_id") == user_id
+                   and e.get("role") == "user"
+                   and e.get("date", "").startswith(today))
+    except:
+        return 0
+
+def check_limit(user_id: int) -> tuple[bool, int]:
+    """Повертає (дозволено, залишилось). Преміум і адмін — без ліміту."""
+    if user_id == ADMIN_ID or is_premium(user_id):
+        return True, 999
+    used = count_today_messages(user_id)
+    remaining = max(0, FREE_DAILY_LIMIT - used)
+    return remaining > 0, remaining
+
+# ══════════════════════════════════════
+#  АНАЛІЗ ПОСИЛАНЬ
+# ══════════════════════════════════════
+def fetch_url_text(url: str) -> str:
+    """Завантажує текст сторінки"""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; MarkBot/1.0)"}
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        # Простий парсинг — видаляємо HTML теги
+        import re
+        text = r.text
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:5000]
+    except Exception as e:
+        return f"ERROR:{e}"
 
 # ══════════════════════════════════════
 #  НОТАТКИ
@@ -1346,6 +1395,71 @@ async def checksite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_state[update.effective_user.id] = "checksite"
         await update.message.reply_text("🌐 Введи адресу сайту:\nНаприклад: `google.com`", parse_mode="Markdown")
 
+async def url_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        url = context.args[0]
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await update.message.reply_text("🔗 Читаю сторінку...")
+        text = fetch_url_text(url)
+        if text.startswith("ERROR:"):
+            await update.message.reply_text(f"❌ Не вдалося відкрити: {text[6:]}")
+            return
+        result = ask_ai(uid, f"Прочитай цей текст зі сторінки і зроби короткий переказ суті (5-7 речень). Що головне на цій сторінці?\n\n{text}")
+        parts = split_long_message(result)
+        for i, part in enumerate(parts):
+            prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
+            await update.message.reply_text(f"🔗 Аналіз сторінки:\n\n{prefix}{part}")
+    else:
+        user_state[uid] = "url"
+        await update.message.reply_text("🔗 Надішли посилання на сторінку — я прочитаю і перекажу суть:")
+
+async def debate_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        topic = " ".join(context.args)
+        user_state[uid] = f"debate_{topic}"
+        result = ask_ai_deep(uid,
+            f"Ти граєш роль опонента в дебатах. Тема: '{topic}'.\n"
+            f"Займи ПРОТИЛЕЖНУ позицію до загальноприйнятої і аргументуй її переконливо. "
+            f"Потім запитай мою думку."
+        )
+        await update.message.reply_text(f"🎭 Режим дебатів: {topic}\n\n{result}")
+    else:
+        user_state[uid] = "debate"
+        await update.message.reply_text(
+            "🎭 Режим дебатів!\n\n"
+            "Я займу протилежну позицію і буду сперечатись з тобою.\n"
+            "Назви тему для дебатів:"
+        )
+
+async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    refs = load_refs()
+    if not refs:
+        await update.message.reply_text("Поки що ніхто нікого не запросив.")
+        return
+    users = {}
+    if os.path.exists(USERS_FILE):
+        try:
+            users = json.load(open(USERS_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    sorted_refs = sorted(refs.items(), key=lambda x: len(x[1]), reverse=True)[:10]
+    lines = ["Топ запрошувачів:\n"]
+    medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
+    for i, (uid_str, invited) in enumerate(sorted_refs):
+        u = users.get(uid_str, {})
+        name = u.get("name", f"User {uid_str}")
+        count = len(invited)
+        prem = "⭐" if is_premium(int(uid_str)) else ""
+        lines.append(f"{medals[i]} {name}{prem} — {count} друзів")
+    uid = update.effective_user.id
+    my_count = get_ref_count(uid)
+    lines.append(f"\nТвоя позиція: {my_count} запрошених")
+    if my_count < 3:
+        lines.append(f"До преміуму: ще {3 - my_count} друзів")
+    await update.message.reply_text("\n".join(lines))
+
 async def deep_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if context.args:
@@ -1771,8 +1885,20 @@ def show_tasks() -> str:
 #  КОМАНДИ
 # ══════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    register_user(update.effective_user)
+    is_new = register_user(update.effective_user)
     uid = update.effective_user.id
+
+    # Сповіщення адміну про нового юзера
+    if is_new:
+        try:
+            u = update.effective_user
+            uname = f"@{u.username}" if u.username else "без username"
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"Новий юзер: {u.first_name} ({uname})\nID: {u.id}"
+            )
+        except:
+            pass
 
     # Обробка реферального посилання
     if context.args and context.args[0].startswith("ref"):
@@ -2387,6 +2513,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await deep_cmd(update, context)
         return
 
+    if text == "🔗 Аналіз сайту":
+        await url_cmd(update, context)
+        return
+
+    if text == "🎭 Дебати":
+        await debate_cmd(update, context)
+        return
+
+    if text == "🏆 Лідерборд":
+        await leaderboard_cmd(update, context)
+        return
+
     if text == "�🔮 Гороскоп":
         await horoscope_cmd(update, context)
         return
@@ -2450,6 +2588,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}")
             else:
                 await update.message.reply_text(part)
+        return
+    if state == "url":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await update.message.reply_text("🔗 Читаю сторінку...")
+        page_text = fetch_url_text(text)
+        if page_text.startswith("ERROR:"):
+            await update.message.reply_text(f"❌ Не вдалося відкрити: {page_text[6:]}")
+        else:
+            result = ask_ai(uid, f"Зроби короткий переказ суті цієї сторінки (5-7 речень):\n\n{page_text}")
+            parts = split_long_message(result)
+            for i, part in enumerate(parts):
+                prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
+                await update.message.reply_text(f"🔗 Аналіз:\n\n{prefix}{part}")
+        return
+    if state == "debate":
+        user_state[uid] = f"debate_{text}"
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai_deep(uid,
+            f"Ти граєш роль опонента в дебатах. Тема: '{text}'.\n"
+            f"Займи ПРОТИЛЕЖНУ позицію і аргументуй її переконливо. Потім запитай мою думку."
+        )
+        await update.message.reply_text(f"🎭 Тема: {text}\n\n{result}")
+        return
+    if state and state.startswith("debate_"):
+        topic = state[7:]
+        user_state[uid] = state  # зберігаємо стан дебатів
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid, f"[Дебати на тему '{topic}'] Відповідь опонента: {text}\nПродовжуй дебати, заперечуй аргументи.")
+        await update.message.reply_text(result)
         return
     if state == "food_photo":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -2636,6 +2803,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- AI відповідь ---
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    # Перевірка ліміту
+    allowed, remaining = check_limit(uid)
+    if not allowed:
+        await update.message.reply_text(
+            f"Ти використав {FREE_DAILY_LIMIT} безкоштовних повідомлень на сьогодні.\n\n"
+            f"Купи Преміум для безлімітного доступу — /premium\n"
+            f"Або запроси 3 друзів — /ref"
+        )
+        return
+
     save_dialog(uid, "user", text)
 
     # Підказка якщо схоже на команду кнопки
@@ -2656,8 +2834,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(hint)
             return
 
+    # Автовизначення URL
+    if text.startswith("http://") or text.startswith("https://"):
+        await update.message.reply_text("🔗 Читаю сторінку...")
+        page_text = fetch_url_text(text)
+        if not page_text.startswith("ERROR:"):
+            result = ask_ai(uid, f"Зроби короткий переказ суті цієї сторінки (5-7 речень):\n\n{page_text}")
+            parts = split_long_message(result)
+            for i, part in enumerate(parts):
+                prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
+                await update.message.reply_text(f"🔗 Аналіз:\n\n{prefix}{part}")
+        else:
+            await update.message.reply_text(f"❌ Не вдалося відкрити посилання.")
+        return
+
+    # Автовизначення запиту на генерацію зображення
+    img_triggers = ["намалюй", "згенеруй картинку", "зроби зображення", "generate image", "draw"]
+    if any(text_lower.startswith(t) for t in img_triggers):
+        prompt = text
+        for t in img_triggers:
+            if text_lower.startswith(t):
+                prompt = text[len(t):].strip()
+                break
+        if prompt:
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+            url = generate_image(prompt)
+            await update.message.reply_photo(photo=url, caption=f"🎨 {prompt}")
+            return
+
     reply = ask_ai(uid, text)
     save_dialog(uid, "assistant", reply)
+
     # Розбиваємо якщо відповідь довга
     parts = split_long_message(reply)
     for i, part in enumerate(parts):
@@ -2665,6 +2872,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}")
         else:
             await update.message.reply_text(part)
+
+    # Показуємо залишок ліміту якщо мало
+    if not is_premium(uid) and uid != ADMIN_ID:
+        remaining_after = remaining - 1
+        if 0 < remaining_after <= 5:
+            await update.message.reply_text(
+                f"Залишилось {remaining_after} повідомлень сьогодні. /premium для безліміту"
+            )
 async def music_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         prompt = " ".join(context.args)
@@ -2851,6 +3066,7 @@ if __name__ == "__main__":
         ("checksite", checksite_cmd), ("summarize", summarize_cmd), ("synonyms", synonyms_cmd),
         ("food", food_cmd), ("memory", memory_cmd), ("forget", forget_cmd),
         ("code", code_cmd), ("users", users_cmd), ("deep", deep_cmd),
+        ("url", url_cmd), ("debate", debate_cmd), ("leaderboard", leaderboard_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
