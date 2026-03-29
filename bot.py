@@ -631,13 +631,15 @@ def analyze_image(image_url: str, question: str = "") -> str:
         return f"❌ Не вдалося розпізнати зображення. ({e})"
 
 def generate_image(prompt: str):
-    """Генерує зображення через Pollinations AI"""
+    """Генерує зображення — повертає bytes або None"""
     import urllib.parse
     seed = random.randint(1, 99999)
     encoded = urllib.parse.quote(prompt)
+    # Пробуємо різні endpoints
     urls = [
         f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}",
         f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&seed={seed}",
+        f"https://pollinations.ai/p/{encoded}?width=1024&height=1024&seed={seed}",
     ]
     for url in urls:
         try:
@@ -647,6 +649,13 @@ def generate_image(prompt: str):
         except:
             continue
     return None
+
+def get_image_url(prompt: str) -> str:
+    """Повертає URL зображення для прямого відкриття"""
+    import urllib.parse
+    seed = random.randint(1, 99999)
+    encoded = urllib.parse.quote(prompt)
+    return f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}"
 
 def generate_quote_image(quote: str, author: str = "") -> io.BytesIO:
     """Генерує мотиваційну картинку: красивий AI фон + текст цитати"""
@@ -3293,7 +3302,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             buf = io.BytesIO(data); buf.name = "img.jpg"
             await update.message.reply_photo(photo=buf, caption=f"🎨 {text[:100]}")
         else:
-            await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
+            img_url = get_image_url(text)
+            await update.message.reply_text(
+                "Не вдалося завантажити. Відкрий напряму:",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути зображення", url=img_url)]])
+            )
         return
     if state == "music":
         import urllib.parse
@@ -3578,7 +3591,11 @@ async def imagine_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             buf = io.BytesIO(data); buf.name = "img.jpg"
             await update.message.reply_photo(photo=buf, caption=f"🎨 {prompt[:100]}")
         else:
-            await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
+            img_url = get_image_url(prompt)
+            await update.message.reply_text(
+                "Не вдалося завантажити. Відкрий напряму:",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути зображення", url=img_url)]])
+            )
     else:
         user_state[update.effective_user.id] = "imagine"
         await update.message.reply_text("🎨 Опиши що намалювати (англійською краще):\nНаприклад: `beautiful sunset over mountains`", parse_mode="Markdown")
