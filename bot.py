@@ -1743,7 +1743,6 @@ async def quote_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             quote = text.strip()
             author = ""
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-        await update.message.reply_text("Генерую картинку...")
         try:
             buf = generate_quote_image(quote, author)
             await update.message.reply_photo(photo=buf, caption=f'"{quote}"\n{("— " + author) if author else ""}')
@@ -1763,7 +1762,6 @@ async def url_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         url = context.args[0]
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🔗 Читаю сторінку...")
         text = fetch_url_text(url)
         if text.startswith("ERROR:"):
             await update.message.reply_text(f"❌ Не вдалося відкрити: {text[6:]}")
@@ -1953,7 +1951,6 @@ async def meme_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _generate_meme(update, topic)
 
 async def _generate_meme(update: Update, topic: str):
-    await update.message.reply_text("😂 Генерую мем...")
     import urllib.parse, time
     prompts = [
         f"funny meme image about {topic}, white background, simple cartoon style, humorous",
@@ -2968,7 +2965,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "deep":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🧠 Аналізую... зачекай до 30 секунд.")
         result = ask_ai_deep(uid, text)
         parts = split_long_message(result)
         for i, part in enumerate(parts):
@@ -2979,7 +2975,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "url":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🔗 Читаю сторінку...")
         page_text = fetch_url_text(text)
         if page_text.startswith("ERROR:"):
             await update.message.reply_text(f"❌ Не вдалося відкрити: {page_text[6:]}")
@@ -3007,7 +3002,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             quote = text.strip()
             author = ""
-        await update.message.reply_text("Генерую картинку...")
         try:
             buf = generate_quote_image(quote, author)
             await update.message.reply_photo(photo=buf, caption=f'"{quote}"\n{("— " + author) if author else ""}')
@@ -3177,7 +3171,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         encoded = urllib.parse.quote(text)
         audio_url = f"https://audio.pollinations.ai/{encoded}"
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_voice")
-        await update.message.reply_text("🎵 Генерую музику, зачекай...")
         try:
             r = requests.get(audio_url, timeout=30)
             if r.status_code == 200 and len(r.content) > 1000:
@@ -3291,7 +3284,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Текст без URL — це задача від юзера
         task = text.replace(url_found, "").strip()
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🔗 Читаю сторінку...")
         page_text = fetch_url_text(url_found)
         if page_text.startswith("ERROR:"):
             page_text = f"Не вдалося відкрити сторінку: {url_found}"
@@ -3328,7 +3320,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                                "кілька картинок", "3 фото", "3 картинки", "4 фото"])
     if multi_img and any(w in text_lower for w in ["згенеруй", "зроби", "намалюй", "створи"]):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-        await update.message.reply_text("Генерую зображення, зачекай...")
         # Просимо AI придумати промпти
         count = 5 if "5" in text_lower else (3 if "3" in text_lower else 4)
         prompts_raw = ask_ai(uid,
@@ -3370,7 +3361,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     has_only_ideas = ("фотографія" in reply_lower or "ідея" in reply_lower) and was_img_request and len(reply) < 800
     if has_only_ideas:
         # Бот дав ідеї — генеруємо реальні зображення
-        await update.message.reply_text("Генерую зображення...")
         prompts_raw = ask_ai(uid,
             f"Придумай 3 промпти для генерації зображень англійською на основі: {text}. "
             f"Кожен з нового рядка, тільки опис, без нумерації."
@@ -3412,7 +3402,6 @@ async def music_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_voice")
-    await update.message.reply_text("🎵 Генерую музику, зачекай...")
     import urllib.parse
     encoded = urllib.parse.quote(prompt)
     audio_url = f"https://audio.pollinations.ai/{encoded}"
@@ -3453,23 +3442,58 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await context.bot.get_file(photo.file_id)
     image_url = file.file_path
 
-    caption = (update.message.caption or "").lower()
-    is_food = user_state.get(uid) == "food_photo" or any(
-        w in caption for w in ["їжа", "страва", "калорії", "food", "calories", "рецепт"]
-    )
+    caption = update.message.caption or ""
+    caption_lower = caption.lower()
 
+    # Якщо підпис містить запит на генерацію — генеруємо нові зображення
+    gen_triggers = ["згенеруй", "зроби схожі", "намалюй", "зроби такі", "хочу такі",
+                    "зроби фото", "зроби картинки", "створи", "generate"]
+    is_gen_request = any(t in caption_lower for t in gen_triggers)
+
+    if is_gen_request:
+        # Спочатку аналізуємо що на фото
+        style_desc = analyze_image(image_url,
+            "Опиши стиль цього зображення одним реченням англійською для генерації схожих: "
+            "стиль, настрій, кольори, тема. Тільки опис без зайвих слів."
+        )
+        # Беремо задачу з підпису
+        task = caption
+        for t in gen_triggers:
+            task = task.replace(t, "").strip()
+
+        # Генеруємо промпти через AI
+        prompts_raw = ask_ai(uid,
+            f"Придумай 3 промпти для генерації зображень англійською в стилі: {style_desc}. "
+            f"Додаткова задача: {task if task else 'схожий стиль'}. "
+            f"Кожен промпт з нового рядка, тільки опис, без нумерації."
+        )
+        prompts = [p.strip() for p in prompts_raw.strip().split("\n") if p.strip()][:3]
+        for i, prompt in enumerate(prompts):
+            try:
+                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+                url = generate_image(prompt)
+                await update.message.reply_photo(photo=url, caption=f"{i+1}/{len(prompts)}")
+            except Exception as e:
+                await update.message.reply_text(f"❌ {e}")
+        return
+
+    # Їжа
+    is_food = user_state.get(uid) == "food_photo" or any(
+        w in caption_lower for w in ["їжа", "страва", "калорії", "food", "calories", "рецепт"]
+    )
     if is_food:
         user_state.pop(uid, None)
-        await update.message.reply_text("🍽 Аналізую страву...")
         result = analyze_image(
             image_url,
-            "Це фото їжі. Визнач: 1) Назву страви 2) Приблизні калорії на порцію 3) Основні інгредієнти 4) Білки/жири/вуглеводи (КБЖУ). Відповідай чітко і структуровано."
+            "Це фото їжі. Визнач: 1) Назву страви 2) Приблизні калорії на порцію 3) Основні інгредієнти 4) КБЖУ. Відповідай чітко і структуровано."
         )
         await update.message.reply_text(f"🍽 Аналіз страви:\n\n{result}")
-    else:
-        await update.message.reply_text("🔍 Аналізую зображення...")
-        result = analyze_image(image_url, update.message.caption or "")
-        await update.message.reply_text(f"🖼 Аналіз зображення:\n\n{result}")
+        return
+
+    # Звичайний аналіз
+    question = caption if caption else ""
+    result = analyze_image(image_url, question)
+    await update.message.reply_text(f"🖼 Аналіз:\n\n{result}")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Читає PDF та текстові файли і аналізує через AI"""
@@ -3482,7 +3506,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    await update.message.reply_text("📄 Читаю файл...")
 
     file = await context.bot.get_file(doc.file_id)
     file_bytes = await file.download_as_bytearray()
@@ -3518,7 +3541,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Розпізнає голосове повідомлення через Groq Whisper"""
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    await update.message.reply_text("🎤 Розпізнаю голос...")
 
     voice = update.message.voice
     file = await context.bot.get_file(voice.file_id)
