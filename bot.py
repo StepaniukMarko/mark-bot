@@ -3824,6 +3824,22 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 #  ЗАПУСК
 # ══════════════════════════════════════
 if __name__ == "__main__":
+    # Примусово скидаємо всі попередні сесії
+    try:
+        requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook",
+            params={"drop_pending_updates": "true"},
+            timeout=10
+        )
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/close",
+            timeout=10
+        )
+        import time
+        time.sleep(3)
+    except:
+        pass
+
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     commands = [
@@ -3887,6 +3903,16 @@ if __name__ == "__main__":
     app.add_error_handler(error_handler)
 
     print("🤖 Марк запущено! Ctrl+C щоб зупинити.")
+
+    # Скидаємо попередні сесії
+    try:
+        import urllib.request
+        urllib.request.urlopen(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook?drop_pending_updates=true",
+            timeout=5
+        )
+    except:
+        pass
 
     # Фонова задача щоденного дайджесту
     async def daily_digest_task():
