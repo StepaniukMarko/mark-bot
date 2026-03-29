@@ -633,7 +633,30 @@ def generate_image(prompt: str) -> str:
     """Генерує зображення через Pollinations AI — повертає URL"""
     import urllib.parse
     encoded = urllib.parse.quote(prompt)
-    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true"
+    # Використовуємо швидший endpoint без enhance
+    seed = random.randint(1, 99999)
+    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&seed={seed}"
+
+async def fetch_image_async(url: str, timeout: int = 20) -> bytes | None:
+    """Асинхронно завантажує зображення"""
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+                if r.status == 200:
+                    data = await r.read()
+                    if len(data) > 1000:
+                        return data
+    except:
+        pass
+    # Запасний варіант — синхронно
+    try:
+        r = requests.get(url, timeout=timeout)
+        if r.status_code == 200 and len(r.content) > 1000:
+            return r.content
+    except:
+        pass
+    return None
 
 def generate_quote_image(quote: str, author: str = "") -> io.BytesIO:
     """Генерує мотиваційну картинку: красивий AI фон + текст цитати"""
@@ -3278,7 +3301,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
         url = generate_image(text)
-        await update.message.reply_photo(photo=url, caption=f"🎨 *{text}*", parse_mode="Markdown")
+        data = await fetch_image_async(url, timeout=20)
+        if data:
+            buf = io.BytesIO(data)
+            buf.name = "img.jpg"
+            await update.message.reply_photo(photo=buf, caption=f"🎨 {text[:100]}")
+        else:
+            await update.message.reply_photo(photo=url, caption=f"🎨 {text[:100]}")
         return
     if state == "music":
         import urllib.parse
@@ -3445,11 +3474,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for prompt in prompts:
             try:
                 url = generate_image(prompt)
-                r = requests.get(url, timeout=15)
-                if r.status_code == 200 and len(r.content) > 1000:
-                    buf = io.BytesIO(r.content)
+                data = await fetch_image_async(url, timeout=20)
+                if data:
+                    buf = io.BytesIO(data)
                     buf.name = "img.jpg"
                     await update.message.reply_photo(photo=buf)
+                    sent += 1
+                else:
+                    # Надсилаємо URL напряму
+                    await update.message.reply_photo(photo=url)
                     sent += 1
             except:
                 pass
@@ -3472,9 +3505,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
             try:
                 url = generate_image(prompt)
-                r = requests.get(url, timeout=15)
-                if r.status_code == 200 and len(r.content) > 1000:
-                    buf = io.BytesIO(r.content)
+                data = await fetch_image_async(url, timeout=20)
+                if data:
+                    buf = io.BytesIO(data)
                     buf.name = "img.jpg"
                     await update.message.reply_photo(photo=buf)
                 else:
