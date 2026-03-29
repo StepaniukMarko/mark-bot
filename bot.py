@@ -35,6 +35,7 @@ MEMORY_FILE    = "memory_tg.json"
 DIARY_FILE     = "diary_tg.json"
 HABITS_FILE    = "habits_tg.json"
 DIGEST_FILE    = "digest_tg.json"
+HF_TOKEN       = "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"
 ANTISPAM       : dict[int, list] = {}   # {user_id: [timestamps]}
 ADMIN_ID       = 1780948739
 
@@ -629,13 +630,48 @@ def analyze_image(image_url: str, question: str = "") -> str:
     except Exception as e:
         return f"❌ Не вдалося розпізнати зображення. ({e})"
 
-def generate_image(prompt: str) -> str:
-    """Генерує зображення через Pollinations AI — повертає URL"""
-    import urllib.parse
-    encoded = urllib.parse.quote(prompt)
-    # Використовуємо швидший endpoint без enhance
-    seed = random.randint(1, 99999)
-    return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&seed={seed}"
+def generate_image(prompt: str) -> bytes | None:
+    """Генерує зображення через HuggingFace FLUX — повертає bytes"""
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    # Пробуємо FLUX.1-schnell — найшвидша модель (3-5 сек)
+    models = [
+        "black-forest-labs/FLUX.1-schnell",
+        "stabilityai/stable-diffusion-xl-base-1.0",
+    ]
+    for model in models:
+        try:
+            r = requests.post(
+                f"https://api-inference.huggingface.co/models/{model}",
+                headers=headers,
+                json={"inputs": prompt, "parameters": {"num_inference_steps": 4}},
+                timeout=30
+            )
+            if r.status_code == 200 and len(r.content) > 1000:
+                return r.content
+        except:
+            continue
+    # Запасний — Pollinations
+    try:
+        import urllib.parse
+        encoded = urllib.parse.quote(prompt)
+        seed = random.randint(1, 99999)
+        url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}"
+        r = requests.get(url, timeout=20)
+        if r.status_code == 200 and len(r.content) > 1000:
+            return r.content
+    except:
+        pass
+    return None
+
+async def fetch_image_async(url: str, timeout: int = 20) -> bytes | None:
+    """Асинхронно завантажує зображення по URL"""
+    try:
+        r = requests.get(url, timeout=timeout)
+        if r.status_code == 200 and len(r.content) > 1000:
+            return r.content
+    except:
+        pass
+    return None
 
 async def fetch_image_async(url: str, timeout: int = 20) -> bytes | None:
     """Асинхронно завантажує зображення"""
@@ -676,12 +712,11 @@ def generate_quote_image(quote: str, author: str = "") -> io.BytesIO:
         "tropical beach paradise golden sunset",
     ]
     bg_prompt = random.choice(bg_prompts)
-    encoded = urllib.parse.quote(bg_prompt)
-    img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=1080&height=1080&nologo=true&seed={random.randint(1,9999)}"
-
-    # Завантажуємо фон
-    r = requests.get(img_url, timeout=30)
-    img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+    # Завантажуємо фон через HuggingFace
+    bg_data = generate_image(bg_prompt + ", wide landscape, no text, beautiful background")
+    if not bg_data:
+        raise Exception("Не вдалося згенерувати фон")
+    img = Image.open(io.BytesIO(bg_data)).convert("RGBA")
     img = img.resize((1080, 1080))
 
     # Темний градієнт знизу для читабельності тексту
@@ -1801,14 +1836,13 @@ async def _generate_comic(update, uid: int, topic: str):
     for i, (text1, text2) in enumerate(pairs[:3]):
         try:
             prompt = bg_styles[i % len(bg_styles)]
-            encoded = urllib.parse.quote(prompt)
-            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=1080&height=1080&nologo=true&seed={random.randint(1,9999)}"
-
-            r = requests.get(img_url, timeout=30)
             from PIL import Image, ImageDraw, ImageFont
             import io as _io
 
-            img = Image.open(_io.BytesIO(r.content)).convert("RGB")
+            bg_data = generate_image(prompt)
+            if not bg_data:
+                continue
+            img = Image.open(_io.BytesIO(bg_data)).convert("RGB")
             img = img.resize((1080, 1080))
 
             # Розбиваємо на 2 частини вертикально
@@ -3300,14 +3334,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "imagine":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
-        url = generate_image(text)
-        data = await fetch_image_async(url, timeout=20)
+        data = generate_image(text)
         if data:
-            buf = io.BytesIO(data)
-            buf.name = "img.jpg"
+            buf = io.BytesIO(data); buf.name = "img.jpg"
             await update.message.reply_photo(photo=buf, caption=f"🎨 {text[:100]}")
         else:
-            await update.message.reply_photo(photo=url, caption=f"🎨 {text[:100]}")
+            await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
         return
     if state == "music":
         import urllib.parse
@@ -3473,18 +3505,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sent = 0
         for prompt in prompts:
             try:
-                url = generate_image(prompt)
-                data = await fetch_image_async(url, timeout=20)
+                data = generate_image(prompt)
                 if data:
-                    buf = io.BytesIO(data)
-                    buf.name = "img.jpg"
+                    buf = io.BytesIO(data); buf.name = "img.jpg"
                     await update.message.reply_photo(photo=buf)
                     sent += 1
-                else:
-                    # Надсилаємо URL напряму
-                    await update.message.reply_photo(photo=url)
-                    sent += 1
-            except:
+                await asyncio.sleep(1)
+            except Exception as e:
                 pass
         if sent == 0:
             await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
@@ -3504,14 +3531,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
             await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
             try:
-                url = generate_image(prompt)
-                data = await fetch_image_async(url, timeout=20)
+                data = generate_image(prompt)
                 if data:
-                    buf = io.BytesIO(data)
-                    buf.name = "img.jpg"
+                    buf = io.BytesIO(data); buf.name = "img.jpg"
                     await update.message.reply_photo(photo=buf)
                 else:
-                    await update.message.reply_photo(photo=url)
+                    await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
             except:
                 await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
             return
@@ -3532,8 +3557,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompts = [p.strip() for p in prompts_raw.strip().split("\n") if p.strip()][:3]
         for i, prompt in enumerate(prompts):
             try:
-                url = generate_image(prompt)
-                await update.message.reply_photo(photo=url, caption=f"{i+1}/{len(prompts)}")
+                data = generate_image(prompt)
+                if data:
+                    buf = io.BytesIO(data); buf.name = "img.jpg"
+                    await update.message.reply_photo(photo=buf)
             except:
                 pass
         return
@@ -3591,8 +3618,13 @@ async def imagine_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         prompt = " ".join(context.args)
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-        url = generate_image(prompt)
-        await update.message.reply_photo(photo=url, caption=f"🎨 *{prompt}*", parse_mode="Markdown")
+        await update.message.reply_text("Добре, генерую. Зачекай ~10 секунд.")
+        data = generate_image(prompt)
+        if data:
+            buf = io.BytesIO(data); buf.name = "img.jpg"
+            await update.message.reply_photo(photo=buf, caption=f"🎨 {prompt[:100]}")
+        else:
+            await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
     else:
         user_state[update.effective_user.id] = "imagine"
         await update.message.reply_text("🎨 Опиши що намалювати (англійською краще):\nНаприклад: `beautiful sunset over mountains`", parse_mode="Markdown")
@@ -3677,45 +3709,46 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if orig_style:
             prompt += f", different from {orig_style}"
 
-        url = generate_image(prompt)
+        img_data = generate_image(prompt)
 
-        if keep_text and texts_on_image:
-            # Накладаємо оригінальний текст на нове зображення
+        if keep_text and texts_on_image and img_data:
             try:
                 from PIL import Image, ImageDraw, ImageFont
                 import io as _io
-                r = requests.get(url, timeout=30)
-                img = Image.open(_io.BytesIO(r.content)).convert("RGB")
+                img = Image.open(_io.BytesIO(img_data)).convert("RGB")
                 img = img.resize((1080, 1080))
-
-                # Темний оверлей знизу
                 overlay = Image.new("RGBA", img.size, (0,0,0,0))
                 draw_ov = ImageDraw.Draw(overlay)
                 for i in range(300):
                     alpha = int(160 * (i/300))
                     draw_ov.rectangle([(0, 780+i), (1080, 781+i)], fill=(0,0,0,alpha))
                 img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-
                 draw = ImageDraw.Draw(img)
                 try:
                     font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 56)
                 except:
                     font = ImageFont.load_default()
-
                 y = 820
                 for t in texts_on_image[:3]:
                     draw.text((42, y+2), t, font=font, fill=(0,0,0))
                     draw.text((40, y), t, font=font, fill=(255,255,255))
                     y += 70
-
                 buf = _io.BytesIO()
                 img.save(buf, format="JPEG", quality=92)
                 buf.seek(0)
                 await update.message.reply_photo(photo=buf)
             except:
-                await update.message.reply_photo(photo=url)
+                if img_data:
+                    buf = io.BytesIO(img_data); buf.name = "img.jpg"
+                    await update.message.reply_photo(photo=buf)
+                else:
+                    await update.message.reply_text("Не вдалося згенерувати.")
         else:
-            await update.message.reply_photo(photo=url)
+            if img_data:
+                buf = io.BytesIO(img_data); buf.name = "img.jpg"
+                await update.message.reply_photo(photo=buf)
+            else:
+                await update.message.reply_text("Не вдалося згенерувати.")
         return
 
     # Їжа
