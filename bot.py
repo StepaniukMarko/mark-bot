@@ -146,7 +146,7 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
     ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
     ["🍽 Калорії",   "📊 Статистика","❓ Допомога"],
-    ["💪 Мотивація", "💻 Код",       "➡️ Ще функції"],
+    ["💪 Мотивація", "💻 Код",  "🖼 Цитата",  "➡️ Ще функції"],
 ], resize_keyboard=True)
 
 PAGE2_KB = ReplyKeyboardMarkup([
@@ -634,6 +634,72 @@ def generate_image(prompt: str) -> str:
     import urllib.parse
     encoded = urllib.parse.quote(prompt)
     return f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&enhance=true"
+
+def generate_quote_image(quote: str, author: str = "") -> io.BytesIO:
+    """Генерує мотиваційну картинку: красивий AI фон + текст цитати"""
+    import urllib.parse
+    from PIL import Image, ImageDraw, ImageFont
+    import textwrap
+
+    # Генеруємо красивий фон
+    bg_prompts = [
+        "breathtaking mountain sunset golden hour cinematic",
+        "beautiful ocean waves at sunset dramatic sky",
+        "misty forest morning light rays magical",
+        "starry night sky milky way galaxy stunning",
+        "cherry blossom trees spring light dreamy",
+        "dramatic storm clouds lightning epic landscape",
+        "northern lights aurora borealis night sky",
+        "tropical beach paradise golden sunset",
+    ]
+    bg_prompt = random.choice(bg_prompts)
+    encoded = urllib.parse.quote(bg_prompt)
+    img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=1080&height=1080&nologo=true&seed={random.randint(1,9999)}"
+
+    # Завантажуємо фон
+    r = requests.get(img_url, timeout=30)
+    img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+    img = img.resize((1080, 1080))
+
+    # Темний градієнт знизу для читабельності тексту
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw_overlay = ImageDraw.Draw(overlay)
+    for i in range(400):
+        alpha = int(180 * (i / 400))
+        draw_overlay.rectangle([(0, 1080 - 400 + i), (1080, 1080 - 400 + i + 1)], fill=(0, 0, 0, alpha))
+    img = Image.alpha_composite(img, overlay).convert("RGB")
+
+    draw = ImageDraw.Draw(img)
+
+    # Шрифт — використовуємо системний або дефолтний
+    try:
+        font_big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 52)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)
+    except:
+        font_big = ImageFont.load_default()
+        font_small = font_big
+
+    # Переносимо текст
+    wrapped = textwrap.fill(quote, width=28)
+    lines = wrapped.split("\n")
+
+    # Малюємо текст з тінню
+    y = 1080 - 80 - len(lines) * 65 - (50 if author else 0)
+    for line in lines:
+        # Тінь
+        draw.text((42, y + 2), line, font=font_big, fill=(0, 0, 0, 180))
+        # Текст
+        draw.text((40, y), line, font=font_big, fill=(255, 255, 255))
+        y += 65
+
+    if author:
+        draw.text((42, y + 2), f"— {author}", font=font_small, fill=(0, 0, 0, 180))
+        draw.text((40, y), f"— {author}", font=font_small, fill=(200, 200, 200))
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=92)
+    buf.seek(0)
+    return buf
 
 def get_ip_info(ip: str = "") -> str:
     try:
@@ -1663,6 +1729,34 @@ async def cv_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- Що шукаєш\n\n"
         "Я зроблю готове резюме:"
     )
+
+async def quote_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        text = " ".join(context.args)
+        # Парсимо: "цитата | автор" або просто цитата
+        if "|" in text:
+            parts = text.split("|", 1)
+            quote = parts[0].strip()
+            author = parts[1].strip()
+        else:
+            quote = text.strip()
+            author = ""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        await update.message.reply_text("Генерую картинку...")
+        try:
+            buf = generate_quote_image(quote, author)
+            await update.message.reply_photo(photo=buf, caption=f'"{quote}"\n{("— " + author) if author else ""}')
+        except Exception as e:
+            await update.message.reply_text(f"❌ Помилка: {e}")
+    else:
+        user_state[uid] = "quote"
+        await update.message.reply_text(
+            "Напиши цитату для картинки.\n\n"
+            "Формат: просто текст\n"
+            "Або з автором: Ніколи не здавайся | Черчілль\n\n"
+            "Або напиши 'авто' — я сам придумаю мотиваційну цитату:"
+        )
 
 async def url_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -2775,8 +2869,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await food_cmd(update, context)
         return
 
-    if text == "� Код":
+    if text == "ð» ÐÐ¾Ð´":
         await code_cmd(update, context)
+        return
+
+    if text == "ð¼ Ð¦Ð¸ÑÐ°ÑÐ°":
+        await quote_cmd(update, context)
         return
 
     if text == "🧠 Моя пам'ять":
@@ -2895,6 +2993,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "diary":
         save_diary_entry(uid, text)
         await update.message.reply_text("Записано в щоденник.")
+        return
+    if state == "quote":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        if text.lower() == "авто":
+            await update.message.reply_text("Придумую цитату...")
+            quote = ask_ai(uid, "Придумай одну коротку потужну мотиваційну цитату українською. Тільки сам текст цитати, без лапок і пояснень. Максимум 10 слів.")
+            author = "Mark AI"
+        elif "|" in text:
+            parts = text.split("|", 1)
+            quote = parts[0].strip()
+            author = parts[1].strip()
+        else:
+            quote = text.strip()
+            author = ""
+        await update.message.reply_text("Генерую картинку...")
+        try:
+            buf = generate_quote_image(quote, author)
+            await update.message.reply_photo(photo=buf, caption=f'"{quote}"\n{("— " + author) if author else ""}')
+        except Exception as e:
+            await update.message.reply_text(f"❌ Помилка генерації: {e}")
         return
     if state == "habits_add":
         habits = load_habits(uid)
@@ -3166,17 +3284,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # Автовизначення URL
-    if text.startswith("http://") or text.startswith("https://"):
+    import re as _re
+    urls_in_text = _re.findall(r'https?://\S+', text)
+    if urls_in_text:
+        url_found = urls_in_text[0]
+        # Текст без URL — це задача від юзера
+        task = text.replace(url_found, "").strip()
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         await update.message.reply_text("🔗 Читаю сторінку...")
-        page_text = fetch_url_text(text)
-        if not page_text.startswith("ERROR:"):
+        page_text = fetch_url_text(url_found)
+        if page_text.startswith("ERROR:"):
+            page_text = f"Не вдалося відкрити сторінку: {url_found}"
+        if task:
+            # Є конкретна задача — виконуємо її з контекстом сторінки
+            prompt = (
+                f"Користувач надіслав посилання: {url_found}\n"
+                f"Вміст сторінки: {page_text[:2000]}\n\n"
+                f"Задача від користувача: {task}\n\n"
+                f"Виконай задачу користувача використовуючи контекст сторінки."
+            )
+            result = ask_ai(uid, prompt)
+            parts = split_long_message(result)
+            for i, part in enumerate(parts):
+                prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
+                await update.message.reply_text(f"{prefix}{part}")
+        else:
+            # Немає задачі — просто переказуємо
             result = ask_ai(uid, f"Зроби короткий переказ суті цієї сторінки (5-7 речень):\n\n{page_text}")
             parts = split_long_message(result)
             for i, part in enumerate(parts):
                 prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
                 await update.message.reply_text(f"🔗 Аналіз:\n\n{prefix}{part}")
-        else:
-            await update.message.reply_text(f"❌ Не вдалося відкрити посилання.")
         return
 
     # Автовизначення запиту на генерацію зображення
@@ -3399,6 +3537,7 @@ if __name__ == "__main__":
         ("code", code_cmd), ("users", users_cmd), ("deep", deep_cmd),
         ("url", url_cmd), ("debate", debate_cmd), ("leaderboard", leaderboard_cmd),
         ("diary", diary_cmd), ("habits", habits_cmd), ("digest", digest_cmd), ("cv", cv_cmd),
+        ("quote", quote_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
