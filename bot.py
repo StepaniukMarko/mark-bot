@@ -630,10 +630,9 @@ def analyze_image(image_url: str, question: str = "") -> str:
     except Exception as e:
         return f"❌ Не вдалося розпізнати зображення. ({e})"
 
-def generate_image(prompt: str) -> bytes | None:
-    """Генерує зображення через HuggingFace FLUX — повертає bytes"""
+def generate_image(prompt: str):
+    """Генерує зображення через HuggingFace FLUX — повертає bytes або None"""
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    # Пробуємо FLUX.1-schnell — найшвидша модель (3-5 сек)
     models = [
         "black-forest-labs/FLUX.1-schnell",
         "stabilityai/stable-diffusion-xl-base-1.0",
@@ -657,37 +656,6 @@ def generate_image(prompt: str) -> bytes | None:
         seed = random.randint(1, 99999)
         url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}"
         r = requests.get(url, timeout=20)
-        if r.status_code == 200 and len(r.content) > 1000:
-            return r.content
-    except:
-        pass
-    return None
-
-async def fetch_image_async(url: str, timeout: int = 20) -> bytes | None:
-    """Асинхронно завантажує зображення по URL"""
-    try:
-        r = requests.get(url, timeout=timeout)
-        if r.status_code == 200 and len(r.content) > 1000:
-            return r.content
-    except:
-        pass
-    return None
-
-async def fetch_image_async(url: str, timeout: int = 20) -> bytes | None:
-    """Асинхронно завантажує зображення"""
-    try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
-                if r.status == 200:
-                    data = await r.read()
-                    if len(data) > 1000:
-                        return data
-    except:
-        pass
-    # Запасний варіант — синхронно
-    try:
-        r = requests.get(url, timeout=timeout)
         if r.status_code == 200 and len(r.content) > 1000:
             return r.content
     except:
