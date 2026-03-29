@@ -1847,6 +1847,7 @@ async def quote_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             quote = text.strip()
             author = ""
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        await update.message.reply_text("Добре, генерую картинку з цитатою. Зачекай ~15 секунд.")
         try:
             buf = generate_quote_image(quote, author)
             await update.message.reply_photo(photo=buf, caption=f'"{quote}"\n{("— " + author) if author else ""}')
@@ -3275,6 +3276,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "imagine":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
         url = generate_image(text)
         await update.message.reply_photo(photo=url, caption=f"🎨 *{text}*", parse_mode="Markdown")
         return
@@ -3432,20 +3434,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                                "кілька картинок", "3 фото", "3 картинки", "4 фото"])
     if multi_img and any(w in text_lower for w in ["згенеруй", "зроби", "намалюй", "створи"]):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-        # Просимо AI придумати промпти
-        count = 5 if "5" in text_lower else (3 if "3" in text_lower else 4)
+        count = min(3, 5 if "5" in text_lower else (3 if "3" in text_lower else 3))
+        await update.message.reply_text(f"Добре, починаю генерувати {count} зображення. Зачекай приблизно {count * 15} секунд.")
         prompts_raw = ask_ai(uid,
-            f"На основі цього запиту придумай {count} різних промптів для генерації зображень англійською мовою. "
-            f"Кожен промпт з нового рядка, без нумерації, тільки опис зображення. "
-            f"Запит: {text}"
+            f"Придумай {count} коротких промптів англійською для генерації зображень. "
+            f"Кожен з нового рядка, без нумерації. Запит: {text}"
         )
         prompts = [p.strip() for p in prompts_raw.strip().split("\n") if p.strip()][:count]
-        for i, prompt in enumerate(prompts):
+        sent = 0
+        for prompt in prompts:
             try:
                 url = generate_image(prompt)
-                await update.message.reply_photo(photo=url, caption=f"{i+1}/{len(prompts)}: {prompt[:100]}")
-            except Exception as e:
-                await update.message.reply_text(f"❌ Помилка {i+1}: {e}")
+                r = requests.get(url, timeout=15)
+                if r.status_code == 200 and len(r.content) > 1000:
+                    buf = io.BytesIO(r.content)
+                    buf.name = "img.jpg"
+                    await update.message.reply_photo(photo=buf)
+                    sent += 1
+            except:
+                pass
+        if sent == 0:
+            await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
         return
 
     if any(text_lower.startswith(t) for t in img_triggers) or any(t in text_lower for t in img_triggers[:6]):
@@ -3460,8 +3469,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
         if prompt and len(prompt) > 3:
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-            url = generate_image(prompt)
-            await update.message.reply_photo(photo=url, caption=f"🎨 {prompt[:200]}")
+            await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
+            try:
+                url = generate_image(prompt)
+                r = requests.get(url, timeout=15)
+                if r.status_code == 200 and len(r.content) > 1000:
+                    buf = io.BytesIO(r.content)
+                    buf.name = "img.jpg"
+                    await update.message.reply_photo(photo=buf)
+                else:
+                    await update.message.reply_photo(photo=url)
+            except:
+                await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
             return
 
     reply = ask_ai(uid, text)
@@ -3566,6 +3585,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_gen_request:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        await update.message.reply_text("Добре, аналізую фото і генерую нове. Зачекай ~20 секунд.")
 
         # Аналізуємо фото — витягуємо текст і стиль
         analysis = analyze_image(image_url,
