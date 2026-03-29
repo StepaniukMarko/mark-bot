@@ -32,6 +32,10 @@ USERS_FILE     = "users_tg.json"
 REFS_FILE      = "refs_tg.json"
 PREMIUM_FILE   = "premium_tg.json"
 MEMORY_FILE    = "memory_tg.json"
+DIARY_FILE     = "diary_tg.json"
+HABITS_FILE    = "habits_tg.json"
+DIGEST_FILE    = "digest_tg.json"
+ANTISPAM       : dict[int, list] = {}   # {user_id: [timestamps]}
 ADMIN_ID       = 1780948739
 
 logging.basicConfig(
@@ -152,14 +156,15 @@ PAGE2_KB = ReplyKeyboardMarkup([
     ["🌐 Мова AI",       "📋 Шпаргалка",  "✍️ Граматика"],
     ["📱 Пост",          "💡 Бізнес-ідея","💰 Витрати"],
     ["🧠 Вікторина",     "💑 Сумісність", "😂 Мем"],
-    ["📅 Розклад",       "🏆 Лідерборд",  "➡️ Сторінка 3", "⬅️ Назад"],
-], resize_keyboard=True)
+    ["📅 Розклад",       "🏆 Лідерборд",  "➡️ Сторінка 3", "⬅️ Назад"],], resize_keyboard=True)
 
 PAGE3_KB = ReplyKeyboardMarkup([
     ["🍅 Помодоро",      "🎮 Нікнейм",    "🌐 Перевірка сайту"],
     ["📝 Резюме тексту", "🔄 Синоніми",   "🌍 Країна по IP"],
     ["🧠 Моя пам'ять",   "🔬 Глибокий аналіз", "⬅️ Назад"],
     ["🔗 Аналіз сайту",  "🎭 Дебати",          "⬅️ Назад"],
+    ["📓 Щоденник",      "💪 Звички",           "📋 Резюме/CV"],
+    ["🌅 Дайджест",      "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -743,8 +748,81 @@ def fetch_url_text(url: str) -> str:
         return f"ERROR:{e}"
 
 # ══════════════════════════════════════
-#  НОТАТКИ
+#  АНТИСПАМ
 # ══════════════════════════════════════
+def check_antispam(user_id: int) -> bool:
+    """Повертає True якщо дозволено, False якщо спам (>10 повід за 60 сек)"""
+    if user_id == ADMIN_ID:
+        return True
+    now = datetime.now().timestamp()
+    times = ANTISPAM.get(user_id, [])
+    times = [t for t in times if now - t < 60]
+    times.append(now)
+    ANTISPAM[user_id] = times
+    return len(times) <= 10
+
+# ══════════════════════════════════════
+#  ЩОДЕННИК
+# ══════════════════════════════════════
+def load_diary(user_id: int) -> list:
+    if not os.path.exists(DIARY_FILE):
+        return []
+    try:
+        data = json.load(open(DIARY_FILE, "r", encoding="utf-8"))
+        return data.get(str(user_id), [])
+    except:
+        return []
+
+def save_diary_entry(user_id: int, text: str):
+    data = {}
+    if os.path.exists(DIARY_FILE):
+        try:
+            data = json.load(open(DIARY_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    entries = data.get(str(user_id), [])
+    entries.append({"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": text})
+    data[str(user_id)] = entries[-100:]  # зберігаємо останні 100
+    json.dump(data, open(DIARY_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+# ══════════════════════════════════════
+#  ТРЕКЕР ЗВИЧОК
+# ══════════════════════════════════════
+def load_habits(user_id: int) -> dict:
+    if not os.path.exists(HABITS_FILE):
+        return {}
+    try:
+        data = json.load(open(HABITS_FILE, "r", encoding="utf-8"))
+        return data.get(str(user_id), {})
+    except:
+        return {}
+
+def save_habits(user_id: int, habits: dict):
+    data = {}
+    if os.path.exists(HABITS_FILE):
+        try:
+            data = json.load(open(HABITS_FILE, "r", encoding="utf-8"))
+        except:
+            pass
+    data[str(user_id)] = habits
+    json.dump(data, open(HABITS_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+# ══════════════════════════════════════
+#  ДАЙДЖЕСТ
+# ══════════════════════════════════════
+def load_digest_settings() -> dict:
+    if not os.path.exists(DIGEST_FILE):
+        return {}
+    try:
+        return json.load(open(DIGEST_FILE, "r", encoding="utf-8"))
+    except:
+        return {}
+
+def save_digest_settings(data: dict):
+    json.dump(data, open(DIGEST_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+# ══════════════════════════════════════
+#  НОТАТКИ# ══════════════════════════════════════
 def load_refs() -> dict:
     if os.path.exists(REFS_FILE):
         try:
@@ -1394,6 +1472,197 @@ async def checksite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         user_state[update.effective_user.id] = "checksite"
         await update.message.reply_text("🌐 Введи адресу сайту:\nНаприклад: `google.com`", parse_mode="Markdown")
+
+async def diary_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        text = " ".join(context.args)
+        save_diary_entry(uid, text)
+        await update.message.reply_text("Запис збережено в щоденник.")
+        return
+    entries = load_diary(uid)
+    if not entries:
+        user_state[uid] = "diary"
+        await update.message.reply_text(
+            "Щоденник порожній.\n\nНапиши як пройшов твій день — я збережу:"
+        )
+        return
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Новий запис", callback_data="diary|new"),
+         InlineKeyboardButton("Переглянути", callback_data="diary|view"),
+         InlineKeyboardButton("Аналіз", callback_data="diary|analyze")],
+    ])
+    last = entries[-1]
+    await update.message.reply_text(
+        f"Щоденник: {len(entries)} записів\nОстанній: {last['date']}\n\n{last['text'][:200]}...",
+        reply_markup=kb
+    )
+
+async def diary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    action = q.data.split("|")[1]
+    if action == "new":
+        user_state[uid] = "diary"
+        await q.edit_message_text("Напиши що хочеш записати в щоденник:")
+    elif action == "view":
+        entries = load_diary(uid)
+        lines = [f"{e['date']}: {e['text'][:100]}" for e in entries[-10:]]
+        await q.edit_message_text("Останні 10 записів:\n\n" + "\n\n".join(lines))
+    elif action == "analyze":
+        entries = load_diary(uid)
+        if not entries:
+            await q.edit_message_text("Немає записів для аналізу.")
+            return
+        combined = "\n".join(f"{e['date']}: {e['text']}" for e in entries[-20:])
+        await q.edit_message_text("Аналізую щоденник...")
+        result = ask_ai(uid, f"Проаналізуй ці записи щоденника і дай інсайти: настрій, патерни, поради:\n\n{combined[:3000]}")
+        await context.bot.send_message(chat_id=uid, text=result)
+
+async def habits_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    habits = load_habits(uid)
+    today = datetime.now().strftime("%Y-%m-%d")
+    if not habits:
+        user_state[uid] = "habits_add"
+        await update.message.reply_text(
+            "Трекер звичок порожній.\n\nНапиши назву звички яку хочеш відстежувати:\nНаприклад: спорт, вода, читання"
+        )
+        return
+    lines = ["Твої звички на сьогодні:\n"]
+    kb_buttons = []
+    for name, data in habits.items():
+        done_today = today in data.get("done_dates", [])
+        streak = data.get("streak", 0)
+        status = "✅" if done_today else "⬜"
+        lines.append(f"{status} {name} — серія: {streak} днів")
+        if not done_today:
+            kb_buttons.append([InlineKeyboardButton(f"✅ {name}", callback_data=f"habit|done|{name}")])
+    kb_buttons.append([InlineKeyboardButton("➕ Нова звичка", callback_data="habit|add")])
+    kb_buttons.append([InlineKeyboardButton("🗑 Видалити", callback_data="habit|delete")])
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(kb_buttons)
+    )
+
+async def habits_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    parts = q.data.split("|")
+    action = parts[1]
+    if action == "done":
+        habit_name = parts[2]
+        habits = load_habits(uid)
+        today = datetime.now().strftime("%Y-%m-%d")
+        if habit_name in habits:
+            done_dates = habits[habit_name].get("done_dates", [])
+            if today not in done_dates:
+                done_dates.append(today)
+                # Рахуємо серію
+                streak = 0
+                check_date = datetime.now()
+                while check_date.strftime("%Y-%m-%d") in done_dates:
+                    streak += 1
+                    check_date = check_date.replace(day=check_date.day - 1)
+                habits[habit_name]["done_dates"] = done_dates[-60:]
+                habits[habit_name]["streak"] = streak
+                save_habits(uid, habits)
+                await q.edit_message_text(f"✅ {habit_name} виконано! Серія: {streak} днів")
+            else:
+                await q.answer("Вже відмічено сьогодні!")
+    elif action == "add":
+        user_state[uid] = "habits_add"
+        await q.edit_message_text("Напиши назву нової звички:")
+    elif action == "delete":
+        habits = load_habits(uid)
+        if habits:
+            user_state[uid] = "habits_delete"
+            names = ", ".join(habits.keys())
+            await q.edit_message_text(f"Яку звичку видалити?\n{names}")
+
+async def digest_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_premium(uid) and uid != ADMIN_ID:
+        await update.message.reply_text(
+            "Щоденний дайджест доступний тільки для Преміум.\n\n"
+            "Купи Преміум: /premium\nАбо запроси 3 друзів: /ref"
+        )
+        return
+    settings = load_digest_settings()
+    user_settings = settings.get(str(uid), {})
+    if user_settings.get("enabled"):
+        hour = user_settings.get("hour", 8)
+        city = user_settings.get("city", "Київ")
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Вимкнути", callback_data="digest|off"),
+             InlineKeyboardButton("Змінити час", callback_data="digest|time"),
+             InlineKeyboardButton("Змінити місто", callback_data="digest|city")],
+        ])
+        await update.message.reply_text(
+            f"Дайджест увімкнено: щодня о {hour}:00, місто: {city}",
+            reply_markup=kb
+        )
+    else:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("7:00", callback_data="digest|set|7"),
+             InlineKeyboardButton("8:00", callback_data="digest|set|8"),
+             InlineKeyboardButton("9:00", callback_data="digest|set|9")],
+        ])
+        await update.message.reply_text(
+            "Щоденний дайджест — кожен ранок отримуєш:\n"
+            "- Погода в твоєму місті\n"
+            "- Топ новини\n"
+            "- Мотивація на день\n\n"
+            "О котрій надсилати?",
+            reply_markup=kb
+        )
+
+async def digest_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    parts = q.data.split("|")
+    action = parts[1]
+    settings = load_digest_settings()
+    key = str(uid)
+    if action == "set":
+        hour = int(parts[2])
+        settings[key] = {"enabled": True, "hour": hour, "city": "Київ"}
+        save_digest_settings(settings)
+        user_state[uid] = "digest_city"
+        await q.edit_message_text(f"Дайджест о {hour}:00. Тепер напиши своє місто:")
+    elif action == "off":
+        if key in settings:
+            settings[key]["enabled"] = False
+            save_digest_settings(settings)
+        await q.edit_message_text("Дайджест вимкнено.")
+    elif action == "time":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("7:00", callback_data="digest|set|7"),
+             InlineKeyboardButton("8:00", callback_data="digest|set|8"),
+             InlineKeyboardButton("9:00", callback_data="digest|set|9"),
+             InlineKeyboardButton("10:00", callback_data="digest|set|10")],
+        ])
+        await q.edit_message_text("Обери новий час:", reply_markup=kb)
+    elif action == "city":
+        user_state[uid] = "digest_city"
+        await q.edit_message_text("Напиши своє місто:")
+
+async def cv_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "cv"
+    await update.message.reply_text(
+        "Генератор резюме/CV.\n\n"
+        "Напиши про себе у вільній формі:\n"
+        "- Ім'я і вік\n"
+        "- Досвід роботи\n"
+        "- Навички\n"
+        "- Освіта\n"
+        "- Що шукаєш\n\n"
+        "Я зроблю готове резюме:"
+    )
 
 async def url_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -2322,6 +2591,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid  = update.effective_user.id
     text = update.message.text
 
+    # Антиспам
+    if not check_antispam(uid):
+        await update.message.reply_text("Надто багато повідомлень. Зачекай хвилину.")
+        return
+
     # --- Кнопки що потребують вводу ---
     input_buttons = {
         "🌤 Погода":      ("weather",   "🌤 Введи назву міста:"),
@@ -2525,6 +2799,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await leaderboard_cmd(update, context)
         return
 
+    if text == "📓 Щоденник":
+        await diary_cmd(update, context)
+        return
+
+    if text == "💪 Звички":
+        await habits_cmd(update, context)
+        return
+
+    if text == "📋 Резюме/CV":
+        await cv_cmd(update, context)
+        return
+
+    if text == "🌅 Дайджест":
+        await digest_cmd(update, context)
+        return
+
     if text == "�🔮 Гороскоп":
         await horoscope_cmd(update, context)
         return
@@ -2601,6 +2891,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i, part in enumerate(parts):
                 prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
                 await update.message.reply_text(f"🔗 Аналіз:\n\n{prefix}{part}")
+        return
+    if state == "diary":
+        save_diary_entry(uid, text)
+        await update.message.reply_text("Записано в щоденник.")
+        return
+    if state == "habits_add":
+        habits = load_habits(uid)
+        habits[text.strip()] = {"done_dates": [], "streak": 0}
+        save_habits(uid, habits)
+        await update.message.reply_text(f"Звичку '{text}' додано! Відмічай щодня через /habits")
+        return
+    if state == "habits_delete":
+        habits = load_habits(uid)
+        name = text.strip()
+        if name in habits:
+            del habits[name]
+            save_habits(uid, habits)
+            await update.message.reply_text(f"Звичку '{name}' видалено.")
+        else:
+            await update.message.reply_text(f"Звичку '{name}' не знайдено.")
+        return
+    if state == "digest_city":
+        settings = load_digest_settings()
+        key = str(uid)
+        if key in settings:
+            settings[key]["city"] = text.strip()
+            save_digest_settings(settings)
+            hour = settings[key].get("hour", 8)
+            await update.message.reply_text(f"Дайджест налаштовано: щодня о {hour}:00, місто: {text.strip()}")
+        return
+    if state == "cv":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Створи професійне резюме/CV на основі цієї інформації. "
+            f"Структуруй: Контакти, Мета, Досвід, Навички, Освіта. "
+            f"Без Markdown зірочок:\n\n{text}"
+        )
+        parts = split_long_message(result)
+        for i, part in enumerate(parts):
+            prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
+            await update.message.reply_text(f"📄 Резюме:\n\n{prefix}{part}")
         return
     if state == "debate":
         user_state[uid] = f"debate_{text}"
@@ -3067,6 +3398,7 @@ if __name__ == "__main__":
         ("food", food_cmd), ("memory", memory_cmd), ("forget", forget_cmd),
         ("code", code_cmd), ("users", users_cmd), ("deep", deep_cmd),
         ("url", url_cmd), ("debate", debate_cmd), ("leaderboard", leaderboard_cmd),
+        ("diary", diary_cmd), ("habits", habits_cmd), ("digest", digest_cmd), ("cv", cv_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -3090,6 +3422,9 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(pomo_callback,        pattern="^pomo\\|"))
     app.add_handler(CallbackQueryHandler(nick_callback,        pattern="^nick\\|"))
     app.add_handler(CallbackQueryHandler(code_lang_callback,   pattern="^code\\|"))
+    app.add_handler(CallbackQueryHandler(diary_callback,        pattern="^diary\\|"))
+    app.add_handler(CallbackQueryHandler(habits_callback,       pattern="^habit\\|"))
+    app.add_handler(CallbackQueryHandler(digest_callback,       pattern="^digest\\|"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
@@ -3100,4 +3435,41 @@ if __name__ == "__main__":
     app.add_error_handler(error_handler)
 
     print("🤖 Марк запущено! Ctrl+C щоб зупинити.")
+
+    # Фонова задача щоденного дайджесту
+    async def daily_digest_task():
+        while True:
+            try:
+                now = datetime.now()
+                settings = load_digest_settings()
+                for uid_str, cfg in settings.items():
+                    if not cfg.get("enabled"):
+                        continue
+                    hour = cfg.get("hour", 8)
+                    last_sent = cfg.get("last_sent", "")
+                    today = now.strftime("%Y-%m-%d")
+                    if now.hour == hour and last_sent != today:
+                        try:
+                            uid_int = int(uid_str)
+                            city = cfg.get("city", "Київ")
+                            weather = get_weather(city)
+                            news = get_news()
+                            motiv = random.choice(MOTIVATIONS)
+                            msg = (
+                                f"Доброго ранку! Твій дайджест на {today}:\n\n"
+                                f"Погода: {weather}\n\n"
+                                f"Новини:\n{news[:500]}\n\n"
+                                f"{motiv}"
+                            )
+                            await app.bot.send_message(chat_id=uid_int, text=msg)
+                            settings[uid_str]["last_sent"] = today
+                            save_digest_settings(settings)
+                        except:
+                            pass
+            except:
+                pass
+            await asyncio.sleep(60)
+
+    asyncio.get_event_loop().create_task(daily_digest_task())
+
     app.run_polling(drop_pending_updates=True)
