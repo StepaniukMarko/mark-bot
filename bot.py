@@ -162,7 +162,7 @@ PAGE3_KB = ReplyKeyboardMarkup([
     ["🍅 Помодоро",      "🎮 Нікнейм",    "🌐 Перевірка сайту"],
     ["📝 Резюме тексту", "🔄 Синоніми",   "🌍 Країна по IP"],
     ["🧠 Моя пам'ять",   "🔬 Глибокий аналіз", "⬅️ Назад"],
-    ["🔗 Аналіз сайту",  "🎭 Дебати",          "⬅️ Назад"],
+    ["🔗 Аналіз сайту",  "🎭 Дебати",  "🎬 Комікс",  "⬅️ Назад"],
     ["📓 Щоденник",      "💪 Звички",           "📋 Резюме/CV"],
     ["🌅 Дайджест",      "⬅️ Назад"],
 ], resize_keyboard=True)
@@ -1730,6 +1730,110 @@ async def cv_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Я зроблю готове резюме:"
     )
 
+async def comic_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Генерує комікс-стиль картинки з текстом як у TikTok"""
+    uid = update.effective_user.id
+    if context.args:
+        topic = " ".join(context.args)
+    else:
+        user_state[uid] = "comic"
+        await update.message.reply_text(
+            "Напиши тему для комікс-картинок.\n\n"
+            "Наприклад:\n"
+            "- будуй бізнес\n"
+            "- займайся спортом\n"
+            "- вчися кожен день\n\n"
+            "Я згенерую 3 картинки в стилі мотиваційного коміксу:"
+        )
+        return
+    await _generate_comic(update, uid, topic)
+
+async def _generate_comic(update, uid: int, topic: str):
+    """Генерує серію мотиваційних картинок з текстом"""
+    import urllib.parse
+
+    # AI придумує пари (дія + "Нікому не говори" або інший підпис)
+    pairs_raw = ask_ai(uid,
+        f"Придумай 3 пари коротких мотиваційних написів українською на тему '{topic}'. "
+        f"Формат: кожна пара на новому рядку через | "
+        f"Наприклад: Будуй бізнес | Нікому не говори\n"
+        f"Тільки 3 рядки, нічого більше."
+    )
+    pairs = []
+    for line in pairs_raw.strip().split("\n"):
+        if "|" in line:
+            parts = line.split("|", 1)
+            pairs.append((parts[0].strip(), parts[1].strip()))
+
+    if not pairs:
+        pairs = [(topic, "Нікому не говори")]
+
+    # Генеруємо картинки
+    bg_styles = [
+        f"anime style man in black suit {topic} city night cinematic",
+        f"anime character working studying {topic} dramatic lighting",
+        f"motivational scene {topic} urban background night",
+    ]
+
+    for i, (text1, text2) in enumerate(pairs[:3]):
+        try:
+            prompt = bg_styles[i % len(bg_styles)]
+            encoded = urllib.parse.quote(prompt)
+            img_url = f"https://image.pollinations.ai/prompt/{encoded}?width=1080&height=1080&nologo=true&seed={random.randint(1,9999)}"
+
+            r = requests.get(img_url, timeout=30)
+            from PIL import Image, ImageDraw, ImageFont
+            import io as _io
+
+            img = Image.open(_io.BytesIO(r.content)).convert("RGB")
+            img = img.resize((1080, 1080))
+
+            # Розбиваємо на 2 частини вертикально
+            top = img.crop((0, 0, 1080, 540))
+            bottom = img.crop((0, 540, 1080, 1080))
+
+            # Темний оверлей
+            from PIL import ImageEnhance
+            top = ImageEnhance.Brightness(top).enhance(0.6)
+            bottom = ImageEnhance.Brightness(bottom).enhance(0.6)
+
+            result = Image.new("RGB", (1080, 1080))
+            result.paste(top, (0, 0))
+            result.paste(bottom, (0, 540))
+
+            draw = ImageDraw.Draw(result)
+
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 58)
+            except:
+                font = ImageFont.load_default()
+
+            # Текст на верхній частині
+            draw.text((42, 452), text1, font=font, fill=(0, 0, 0))
+            draw.text((40, 450), text1, font=font, fill=(255, 255, 255))
+
+            # Текст на нижній частині
+            draw.text((42, 992), text2, font=font, fill=(0, 0, 0))
+            draw.text((40, 990), text2, font=font, fill=(255, 255, 255))
+
+            # Лінія між частинами
+            draw.rectangle([(0, 538), (1080, 542)], fill=(255, 255, 255))
+
+            buf = _io.BytesIO()
+            result.save(buf, format="JPEG", quality=92)
+            buf.seek(0)
+
+            await update.message.reply_photo(photo=buf)
+        except Exception as e:
+            # Запасний варіант — просто картинка без тексту
+            try:
+                import urllib.parse as _up
+                p = _up.quote(f"motivational {topic} cinematic")
+                url = f"https://image.pollinations.ai/prompt/{p}?width=1080&height=1080&nologo=true"
+                await update.message.reply_photo(photo=url, caption=f"{text1} | {text2}")
+            except:
+                pass
+
 async def quote_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if context.args:
@@ -2890,6 +2994,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await debate_cmd(update, context)
         return
 
+    if text == "🎬 Комікс":
+        await comic_cmd(update, context)
+        return
+
     if text == "🏆 Лідерборд":
         await leaderboard_cmd(update, context)
         return
@@ -2988,6 +3096,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "diary":
         save_diary_entry(uid, text)
         await update.message.reply_text("Записано в щоденник.")
+        return
+    if state == "comic":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        await _generate_comic(update, uid, text)
         return
     if state == "quote":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
@@ -3445,36 +3557,112 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = update.message.caption or ""
     caption_lower = caption.lower()
 
-    # Якщо підпис містить запит на генерацію — генеруємо нові зображення
+    # Тригери для генерації/зміни стилю
     gen_triggers = ["згенеруй", "зроби схожі", "намалюй", "зроби такі", "хочу такі",
-                    "зроби фото", "зроби картинки", "створи", "generate"]
+                    "зроби фото", "зроби картинки", "створи", "generate",
+                    "в іншому стилі", "інший стиль", "змін стиль", "але стиль",
+                    "трохи інакше", "по-іншому"]
     is_gen_request = any(t in caption_lower for t in gen_triggers)
 
     if is_gen_request:
-        # Спочатку аналізуємо що на фото
-        style_desc = analyze_image(image_url,
-            "Опиши стиль цього зображення одним реченням англійською для генерації схожих: "
-            "стиль, настрій, кольори, тема. Тільки опис без зайвих слів."
-        )
-        # Беремо задачу з підпису
-        task = caption
-        for t in gen_triggers:
-            task = task.replace(t, "").strip()
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
 
-        # Генеруємо промпти через AI
-        prompts_raw = ask_ai(uid,
-            f"Придумай 3 промпти для генерації зображень англійською в стилі: {style_desc}. "
-            f"Додаткова задача: {task if task else 'схожий стиль'}. "
-            f"Кожен промпт з нового рядка, тільки опис, без нумерації."
+        # Аналізуємо фото — витягуємо текст і стиль
+        analysis = analyze_image(image_url,
+            "Analyze this image and return JSON with these fields:\n"
+            "- texts: list of all text/words visible on the image\n"
+            "- style: visual style description in English (anime/realistic/cartoon etc)\n"
+            "- mood: mood/atmosphere in English\n"
+            "- subject: main subject in English\n"
+            "Return ONLY valid JSON, nothing else."
         )
-        prompts = [p.strip() for p in prompts_raw.strip().split("\n") if p.strip()][:3]
-        for i, prompt in enumerate(prompts):
+
+        # Парсимо JSON з аналізу
+        import re as _re, json as _json
+        texts_on_image = []
+        orig_style = ""
+        orig_subject = ""
+        try:
+            j_match = _re.search(r'\{.*\}', analysis, _re.DOTALL)
+            if j_match:
+                j = _json.loads(j_match.group())
+                texts_on_image = j.get("texts", [])
+                orig_style = j.get("style", "")
+                orig_subject = j.get("subject", "")
+        except:
+            pass
+
+        # Визначаємо новий стиль з підпису
+        style_keywords = {
+            "реалістичний": "photorealistic",
+            "аніме": "anime style",
+            "мультяшний": "cartoon style",
+            "3d": "3D render",
+            "акварель": "watercolor painting",
+            "мінімалістичний": "minimalist",
+            "темний": "dark dramatic",
+            "яскравий": "vibrant colorful",
+            "вінтаж": "vintage retro",
+            "кіно": "cinematic film",
+        }
+        new_style = ""
+        for uk, en in style_keywords.items():
+            if uk in caption_lower:
+                new_style = en
+                break
+
+        # Якщо стиль не вказаний — просимо AI придумати інший
+        if not new_style:
+            styles = ["photorealistic", "anime style", "cartoon", "3D render", "watercolor", "cinematic"]
+            new_style = random.choice([s for s in styles if s.lower() not in orig_style.lower()])
+
+        # Зберігаємо текст з оригіналу якщо просять
+        keep_text = "залиш текст" in caption_lower or "текст залиш" in caption_lower or "той самий текст" in caption_lower
+
+        # Генеруємо нове зображення
+        prompt = f"{new_style}, {orig_subject or 'motivational scene'}, high quality, detailed"
+        if orig_style:
+            prompt += f", different from {orig_style}"
+
+        url = generate_image(prompt)
+
+        if keep_text and texts_on_image:
+            # Накладаємо оригінальний текст на нове зображення
             try:
-                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-                url = generate_image(prompt)
-                await update.message.reply_photo(photo=url, caption=f"{i+1}/{len(prompts)}")
-            except Exception as e:
-                await update.message.reply_text(f"❌ {e}")
+                from PIL import Image, ImageDraw, ImageFont
+                import io as _io
+                r = requests.get(url, timeout=30)
+                img = Image.open(_io.BytesIO(r.content)).convert("RGB")
+                img = img.resize((1080, 1080))
+
+                # Темний оверлей знизу
+                overlay = Image.new("RGBA", img.size, (0,0,0,0))
+                draw_ov = ImageDraw.Draw(overlay)
+                for i in range(300):
+                    alpha = int(160 * (i/300))
+                    draw_ov.rectangle([(0, 780+i), (1080, 781+i)], fill=(0,0,0,alpha))
+                img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
+                draw = ImageDraw.Draw(img)
+                try:
+                    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 56)
+                except:
+                    font = ImageFont.load_default()
+
+                y = 820
+                for t in texts_on_image[:3]:
+                    draw.text((42, y+2), t, font=font, fill=(0,0,0))
+                    draw.text((40, y), t, font=font, fill=(255,255,255))
+                    y += 70
+
+                buf = _io.BytesIO()
+                img.save(buf, format="JPEG", quality=92)
+                buf.seek(0)
+                await update.message.reply_photo(photo=buf)
+            except:
+                await update.message.reply_photo(photo=url)
+        else:
+            await update.message.reply_photo(photo=url)
         return
 
     # Їжа
@@ -3483,17 +3671,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if is_food:
         user_state.pop(uid, None)
-        result = analyze_image(
-            image_url,
+        result = analyze_image(image_url,
             "Це фото їжі. Визнач: 1) Назву страви 2) Приблизні калорії на порцію 3) Основні інгредієнти 4) КБЖУ. Відповідай чітко і структуровано."
         )
-        await update.message.reply_text(f"🍽 Аналіз страви:\n\n{result}")
+        await update.message.reply_text(result)
         return
 
     # Звичайний аналіз
     question = caption if caption else ""
     result = analyze_image(image_url, question)
-    await update.message.reply_text(f"🖼 Аналіз:\n\n{result}")
+    await update.message.reply_text(result)
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Читає PDF та текстові файли і аналізує через AI"""
@@ -3609,7 +3796,7 @@ if __name__ == "__main__":
         ("code", code_cmd), ("users", users_cmd), ("deep", deep_cmd),
         ("url", url_cmd), ("debate", debate_cmd), ("leaderboard", leaderboard_cmd),
         ("diary", diary_cmd), ("habits", habits_cmd), ("digest", digest_cmd), ("cv", cv_cmd),
-        ("quote", quote_cmd),
+        ("quote", quote_cmd), ("comic", comic_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
