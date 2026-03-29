@@ -23,7 +23,7 @@ from telegram.ext import (
 #  КОНФІГ
 # ══════════════════════════════════════
 TELEGRAM_TOKEN = "8252626800:AAEKP5lYp1BhkJIbZ7_SQIhu1GQM3idjFuQ"
-GROQ_API_KEY   = "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"
+GROQ_API_KEY   = "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"
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 DIALOG_FILE    = "dialog_history.json"
 NOTES_FILE     = "notes_tg.txt"
