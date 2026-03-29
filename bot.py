@@ -57,15 +57,25 @@ LANG_PROMPTS = {
 # ══════════════════════════════════════
 #  КОНТЕНТ
 # ══════════════════════════════════════
-SYSTEM_PROMPT = """Ти — Марк, геніальний AI-асистент.
+SYSTEM_PROMPT = """Ти — Марк, геніальний AI-асистент з характером.
+
+Твоя особистість:
+- Розумний, дотепний і щирий друг — не сухий робот
+- Відповідаєш з теплотою і легким гумором коли доречно
+- Якщо людина сумна або стресує — підтримуєш і надихаєш
+- Якщо питання просте — відповідаєш коротко і по суті
+- Якщо питання складне — даєш глибоку структуровану відповідь
+- Іноді додаєш цікавий факт або несподіваний кут зору
+- Пам'ятаєш контекст розмови і посилаєшся на нього
 
 Правила відповідей:
-• Відповідай ВИКЛЮЧНО українською мовою
-• ЗАБОРОНЕНО використовувати: **, *, ##, ###, `код`, китайські/японські/арабські символи
-• Числа пиши просто: 2024, не $2024$
-• Структуруй відповідь через нумерацію (1. 2. 3.) або тире (-)
-• Будь конкретним, корисним і дружнім
-• Відповіді змістовні але без зайвої води"""
+- Відповідай ВИКЛЮЧНО українською мовою
+- ЗАБОРОНЕНО: **, *, ##, ###, китайські/японські/арабські символи, LaTeX ($...$)
+- Числа пиши просто: 2024, не $2024$
+- Структуруй через нумерацію (1. 2. 3.) або тире (-)
+- Відповіді змістовні але без зайвої води
+- Ніколи не кажи "Як AI я не можу..." — просто допомагай
+- Якщо не знаєш точної відповіді — скажи чесно і запропонуй альтернативу"""
 
 JOKES = [
     "😂 Чому програмісти не люблять природу? Там забагато багів 🐛",
@@ -148,7 +158,7 @@ PAGE2_KB = ReplyKeyboardMarkup([
 PAGE3_KB = ReplyKeyboardMarkup([
     ["🍅 Помодоро",      "🎮 Нікнейм",    "🌐 Перевірка сайту"],
     ["📝 Резюме тексту", "🔄 Синоніми",   "🌍 Країна по IP"],
-    ["🧠 Моя пам'ять",   "⬅️ Назад"],
+    ["🧠 Моя пам'ять",   "🔬 Глибокий аналіз", "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -218,7 +228,7 @@ def ask_ai(user_id: int, message: str) -> str:
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "system", "content": system}] + history[-20:],
         "temperature": 0.8,
-        "max_tokens": 1500,
+        "max_tokens": 8000,
     }
     try:
         r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=20)
@@ -232,6 +242,55 @@ def ask_ai(user_id: int, message: str) -> str:
         return clean_ai_text(reply)
     except Exception as e:
         return f"😴 AI тимчасово недоступний. Спробуй ще раз! ({e})"
+def split_long_message(text: str, limit: int = 4000) -> list[str]:
+    """Розбиває довгий текст на частини не більше limit символів"""
+    if len(text) <= limit:
+        return [text]
+    parts = []
+    while text:
+        if len(text) <= limit:
+            parts.append(text)
+            break
+        # Шукаємо останній перенос рядка в межах ліміту
+        cut = text.rfind("\n", 0, limit)
+        if cut == -1:
+            cut = text.rfind(" ", 0, limit)
+        if cut == -1:
+            cut = limit
+        parts.append(text[:cut].strip())
+        text = text[cut:].strip()
+    return parts
+
+def ask_ai_deep(user_id: int, task: str) -> str:
+    """Режим глибокого аналізу — бот думає крок за кроком"""
+    lang = user_lang.get(user_id, "uk")
+    lang_instruction = LANG_PROMPTS.get(lang, LANG_PROMPTS["uk"])
+    mem_text = memory_to_text(load_memory(user_id))
+    system = (
+        f"Ти — Марк, геніальний AI-асистент. {lang_instruction}\n"
+        f"ЗАБОРОНЕНО: **, *, ##, ###, китайські символи, LaTeX.\n"
+        f"Зараз ти в режимі ГЛИБОКОГО АНАЛІЗУ.\n"
+        f"Підхід: розбий задачу на кроки, виконай кожен крок ретельно, "
+        f"дай вичерпну відповідь. Не поспішай — якість важливіша за швидкість."
+    )
+    if mem_text:
+        system += f"\n\nПро користувача:\n{mem_text}"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": task}
+        ],
+        "temperature": 0.5,
+        "max_tokens": 8000,
+    }
+    try:
+        r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
+        r.raise_for_status()
+        return clean_ai_text(r.json()["choices"][0]["message"]["content"])
+    except Exception as e:
+        return f"😴 Помилка: {e}"
 
 def detect_language(text: str) -> str:
     """Визначає мову тексту через Groq"""
@@ -1287,6 +1346,27 @@ async def checksite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_state[update.effective_user.id] = "checksite"
         await update.message.reply_text("🌐 Введи адресу сайту:\nНаприклад: `google.com`", parse_mode="Markdown")
 
+async def deep_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        task = " ".join(context.args)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await update.message.reply_text("🧠 Глибокий аналіз... це може зайняти до 30 секунд.")
+        result = ask_ai_deep(uid, task)
+        parts = split_long_message(result)
+        for i, part in enumerate(parts):
+            if len(parts) > 1:
+                await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}")
+            else:
+                await update.message.reply_text(part)
+    else:
+        user_state[uid] = "deep"
+        await update.message.reply_text(
+            "🧠 Режим глибокого аналізу.\n\n"
+            "Опиши задачу детально — я розберу її крок за кроком і дам вичерпну відповідь.\n\n"
+            "Підходить для: складних питань, великих кодів, бізнес-планів, аналізу, рефератів."
+        )
+
 async def code_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if context.args:
@@ -1711,52 +1791,49 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     name = update.effective_user.first_name
-    await update.message.reply_text(
-        f"👋 Привіт, *{name}*\\! Я *Марк* — твій розумний AI\\-асистент 🤖✨\n\n"
-        f"🧠 Відповім на будь\\-яке питання\n"
-        f"💻 Напишу код будь\\-якою мовою\n"
-        f"🌤 Покажу погоду та новини\n"
-        f"📝 Збережу нотатки та задачі\n"
-        f"💱 Конвертую валюти та крипту\n"
-        f"🎲 Розважу іграми\n\n"
-        f"Просто напиши або обери кнопку 👇",
-        parse_mode="MarkdownV2",
-        reply_markup=MAIN_KB
-    )
+    msgs = count_dialogs(uid)
+    mem = load_memory(uid)
+    known_name = mem.get("name", name)
+
+    if msgs > 0:
+        # Юзер повертається
+        greetings = [
+            f"З поверненням, {known_name}! Скучив за тобою 😄",
+            f"О, {known_name}! Радий тебе знову бачити 👋",
+            f"Привіт, {known_name}! Готовий до нових питань 🚀",
+            f"{known_name}, привіт! Що сьогодні цікавить? 🤔",
+        ]
+        greeting = random.choice(greetings)
+        await update.message.reply_text(greeting, reply_markup=MAIN_KB)
+    else:
+        # Новий юзер
+        await update.message.reply_text(
+            f"Привіт, {name}! Я Марк — твій AI-асистент.\n\n"
+            f"Можу відповісти на будь-яке питання, написати код, "
+            f"порахувати калорії, перекласти текст, розсмішити жартом "
+            f"і ще десятки речей.\n\n"
+            f"Просто напиши що тебе цікавить — або обери кнопку нижче:",
+            reply_markup=MAIN_KB
+        )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.effective_user.first_name
     text = (
-        "🤖 *Команди Марка:*\n\n"
-        "🌤 /weather \\[місто\\] — погода\n"
-        "📰 /news — новини\n"
-        "💱 /currency 100 USD UAH — валюта\n"
-        "₿ /crypto — ціна криптовалюти\n"
-        "🌐 /translate \\[текст\\] — переклад\n"
-        "😂 /joke — жарт\n"
-        "🧠 /fact — факт\n"
-        "💪 /motivate — мотивація\n"
-        "🔮 /horoscope \\[знак\\] — гороскоп\n"
-        "📝 /note \\[текст\\] — нотатка\n"
-        "📋 /notes — переглянути нотатки\n"
-        "🗑 /clearnotes — очистити нотатки\n"
-        "✅ /task \\[текст\\] — задача\n"
-        "📋 /tasks — список задач\n"
-        "✔ /done \\[N\\] — виконати задачу\n"
-        "❌ /deltask \\[N\\] — видалити задачу\n"
-        "🧮 /calc \\[вираз\\] — калькулятор\n"
-        "📖 /wiki \\[тема\\] — Вікіпедія\n"
-        "📷 /qr \\[текст\\] — QR\\-код\n"
-        "🔗 /short \\[url\\] — скоротити посилання\n"
-        "🌍 /ip \\[адреса\\] — інфо про IP\n"
-        "⏰ /remind \\[хв\\] \\[текст\\] — нагадування\n"
-        "🎲 /guess — вгадай число\n"
-        "🎲 /dice — кубик\n"
-        "🪙 /coin — монетка\n"
-        "📊 /stats — статистика\n"
-        "🗑 /clear — очистити пам'ять AI\n\n"
-        "💬 Або просто напиши — відповім\\! 🤖"
+        f"Привіт, {name}! Ось що я вмію:\n\n"
+        "Просто напиши мені будь-що — я відповім як розумний друг.\n\n"
+        "Або використовуй кнопки:\n"
+        "- Погода, Новини, Валюта, Крипта\n"
+        "- Калькулятор, Переклад, Вікіпедія\n"
+        "- Нотатки, Задачі, Нагадування\n"
+        "- Генерація картинок, Музика\n"
+        "- Калорії страв, Аналіз фото\n"
+        "- Код на будь-якій мові\n"
+        "- Жарти, Факти, Гороскоп, Ігри\n"
+        "- І ще десятки функцій на сторінках 2 і 3\n\n"
+        "Я також запам'ятовую про тебе важливі речі — /memory щоб побачити.\n\n"
+        "Просто спілкуйся зі мною як з другом — я тут!"
     )
-    await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=MAIN_KB)
+    await update.message.reply_text(text, reply_markup=MAIN_KB)
 
 async def weather_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     city = " ".join(context.args) if context.args else "Kyiv"
@@ -2306,6 +2383,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await memory_cmd(update, context)
         return
 
+    if text == "🔬 Глибокий аналіз":
+        await deep_cmd(update, context)
+        return
+
     if text == "�🔮 Гороскоп":
         await horoscope_cmd(update, context)
         return
@@ -2358,6 +2439,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"⚠️ Код відповіді: {r.status_code}")
         except:
             await update.message.reply_text(f"❌ Сайт {url} недоступний")
+        return
+    if state == "deep":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await update.message.reply_text("🧠 Аналізую... зачекай до 30 секунд.")
+        result = ask_ai_deep(uid, text)
+        parts = split_long_message(result)
+        for i, part in enumerate(parts):
+            if len(parts) > 1:
+                await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}")
+            else:
+                await update.message.reply_text(part)
         return
     if state == "food_photo":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -2566,8 +2658,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply = ask_ai(uid, text)
     save_dialog(uid, "assistant", reply)
-    await update.message.reply_text(reply)
-
+    # Розбиваємо якщо відповідь довга
+    parts = split_long_message(reply)
+    for i, part in enumerate(parts):
+        if len(parts) > 1:
+            await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}")
+        else:
+            await update.message.reply_text(part)
 async def music_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         prompt = " ".join(context.args)
@@ -2753,7 +2850,7 @@ if __name__ == "__main__":
         ("pomodoro", pomodoro_cmd), ("nickname", nickname_cmd),
         ("checksite", checksite_cmd), ("summarize", summarize_cmd), ("synonyms", synonyms_cmd),
         ("food", food_cmd), ("memory", memory_cmd), ("forget", forget_cmd),
-        ("code", code_cmd), ("users", users_cmd),
+        ("code", code_cmd), ("users", users_cmd), ("deep", deep_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
