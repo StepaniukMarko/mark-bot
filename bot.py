@@ -35,7 +35,7 @@ MEMORY_FILE    = "memory_tg.json"
 DIARY_FILE     = "diary_tg.json"
 HABITS_FILE    = "habits_tg.json"
 DIGEST_FILE    = "digest_tg.json"
-HF_TOKEN       = "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"
+HF_TOKEN       = "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"
 ANTISPAM       : dict[int, list] = {}   # {user_id: [timestamps]}
 ADMIN_ID       = 1780948739
 
@@ -631,41 +631,21 @@ def analyze_image(image_url: str, question: str = "") -> str:
         return f"❌ Не вдалося розпізнати зображення. ({e})"
 
 def generate_image(prompt: str):
-    """Генерує зображення через HuggingFace FLUX — повертає bytes або None"""
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    models = [
-        "black-forest-labs/FLUX.1-schnell",
-        "stabilityai/stable-diffusion-xl-base-1.0",
+    """Генерує зображення через Pollinations AI"""
+    import urllib.parse
+    seed = random.randint(1, 99999)
+    encoded = urllib.parse.quote(prompt)
+    urls = [
+        f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}",
+        f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true&seed={seed}",
     ]
-    for model in models:
-        for attempt in range(2):  # 2 спроби на кожну модель
-            try:
-                r = requests.post(
-                    f"https://api-inference.huggingface.co/models/{model}",
-                    headers=headers,
-                    json={"inputs": prompt, "parameters": {"num_inference_steps": 4}},
-                    timeout=45
-                )
-                if r.status_code == 200 and len(r.content) > 1000:
-                    return r.content
-                if r.status_code == 503:
-                    # Модель завантажується — чекаємо
-                    import time
-                    time.sleep(10)
-                    continue
-            except:
-                break
-    # Запасний — Pollinations
-    try:
-        import urllib.parse
-        encoded = urllib.parse.quote(prompt)
-        seed = random.randint(1, 99999)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}"
-        r = requests.get(url, timeout=25)
-        if r.status_code == 200 and len(r.content) > 1000:
-            return r.content
-    except:
-        pass
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=30)
+            if r.status_code == 200 and len(r.content) > 1000:
+                return r.content
+        except:
+            continue
     return None
 
 def generate_quote_image(quote: str, author: str = "") -> io.BytesIO:
