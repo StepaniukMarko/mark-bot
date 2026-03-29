@@ -3318,21 +3318,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Автовизначення запиту на генерацію зображення
-    img_triggers = ["намалюй", "згенеруй картинку", "зроби зображення", "generate image", "draw"]
-    if any(text_lower.startswith(t) for t in img_triggers):
+    img_triggers = [
+        "намалюй", "згенеруй картинку", "згенеруй фото", "згенеруй зображення",
+        "зроби зображення", "зроби фото", "зроби картинку",
+        "generate image", "draw", "створи зображення", "створи картинку"
+    ]
+    # Перевіряємо чи є запит на кілька зображень
+    multi_img = any(w in text_lower for w in ["5 фото", "5 картинок", "5 зображень", "кілька фото",
+                                               "кілька картинок", "3 фото", "3 картинки", "4 фото"])
+    if multi_img and any(w in text_lower for w in ["згенеруй", "зроби", "намалюй", "створи"]):
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        await update.message.reply_text("Генерую зображення, зачекай...")
+        # Просимо AI придумати промпти
+        count = 5 if "5" in text_lower else (3 if "3" in text_lower else 4)
+        prompts_raw = ask_ai(uid,
+            f"На основі цього запиту придумай {count} різних промптів для генерації зображень англійською мовою. "
+            f"Кожен промпт з нового рядка, без нумерації, тільки опис зображення. "
+            f"Запит: {text}"
+        )
+        prompts = [p.strip() for p in prompts_raw.strip().split("\n") if p.strip()][:count]
+        for i, prompt in enumerate(prompts):
+            try:
+                url = generate_image(prompt)
+                await update.message.reply_photo(photo=url, caption=f"{i+1}/{len(prompts)}: {prompt[:100]}")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Помилка {i+1}: {e}")
+        return
+
+    if any(text_lower.startswith(t) for t in img_triggers) or any(t in text_lower for t in img_triggers[:6]):
+        # Знаходимо що саме генерувати
         prompt = text
-        for t in img_triggers:
-            if text_lower.startswith(t):
-                prompt = text[len(t):].strip()
+        for t in sorted(img_triggers, key=len, reverse=True):
+            if t in text_lower:
+                idx = text_lower.find(t)
+                prompt = text[idx + len(t):].strip()
+                if not prompt:
+                    prompt = text
                 break
-        if prompt:
+        if prompt and len(prompt) > 3:
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
             url = generate_image(prompt)
-            await update.message.reply_photo(photo=url, caption=f"🎨 {prompt}")
+            await update.message.reply_photo(photo=url, caption=f"🎨 {prompt[:200]}")
             return
 
     reply = ask_ai(uid, text)
     save_dialog(uid, "assistant", reply)
+
+    # Якщо AI відповів ідеями замість дії — перевіряємо
+    reply_lower = reply.lower()
+    was_img_request = any(w in text_lower for w in ["згенеруй", "намалюй", "зроби фото", "зроби картинку", "створи зображення"])
+    has_only_ideas = ("фотографія" in reply_lower or "ідея" in reply_lower) and was_img_request and len(reply) < 800
+    if has_only_ideas:
+        # Бот дав ідеї — генеруємо реальні зображення
+        await update.message.reply_text("Генерую зображення...")
+        prompts_raw = ask_ai(uid,
+            f"Придумай 3 промпти для генерації зображень англійською на основі: {text}. "
+            f"Кожен з нового рядка, тільки опис, без нумерації."
+        )
+        prompts = [p.strip() for p in prompts_raw.strip().split("\n") if p.strip()][:3]
+        for i, prompt in enumerate(prompts):
+            try:
+                url = generate_image(prompt)
+                await update.message.reply_photo(photo=url, caption=f"{i+1}/{len(prompts)}")
+            except:
+                pass
+        return
 
     # Розбиваємо якщо відповідь довга
     parts = split_long_message(reply)
