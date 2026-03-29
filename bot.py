@@ -638,24 +638,30 @@ def generate_image(prompt: str):
         "stabilityai/stable-diffusion-xl-base-1.0",
     ]
     for model in models:
-        try:
-            r = requests.post(
-                f"https://api-inference.huggingface.co/models/{model}",
-                headers=headers,
-                json={"inputs": prompt, "parameters": {"num_inference_steps": 4}},
-                timeout=30
-            )
-            if r.status_code == 200 and len(r.content) > 1000:
-                return r.content
-        except:
-            continue
+        for attempt in range(2):  # 2 спроби на кожну модель
+            try:
+                r = requests.post(
+                    f"https://api-inference.huggingface.co/models/{model}",
+                    headers=headers,
+                    json={"inputs": prompt, "parameters": {"num_inference_steps": 4}},
+                    timeout=45
+                )
+                if r.status_code == 200 and len(r.content) > 1000:
+                    return r.content
+                if r.status_code == 503:
+                    # Модель завантажується — чекаємо
+                    import time
+                    time.sleep(10)
+                    continue
+            except:
+                break
     # Запасний — Pollinations
     try:
         import urllib.parse
         encoded = urllib.parse.quote(prompt)
         seed = random.randint(1, 99999)
         url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}"
-        r = requests.get(url, timeout=20)
+        r = requests.get(url, timeout=25)
         if r.status_code == 200 and len(r.content) > 1000:
             return r.content
     except:
