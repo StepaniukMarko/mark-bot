@@ -4062,27 +4062,31 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Зберігаємо текст з оригіналу якщо просять
         keep_text = "залиш текст" in caption_lower or "текст залиш" in caption_lower or "той самий текст" in caption_lower
 
-        # Якщо просять іншу цитату — генеруємо нову
-        if any(w in caption_lower for w in ["інша цитата", "інший текст", "інші слова", "змін текст", "інше слово"]):
+        # Генеруємо нову цитату тільки якщо просять
+        if any(w in caption_lower for w in ["цитата", "текст", "слова", "напис", "підпис"]):
             new_quote = ask_ai(uid,
-                f"Придумай одну коротку мотиваційну цитату українською (максимум 5 слів). "
-                f"Тільки сам текст цитати, без лапок."
+                f"На основі цього запиту придумай одну коротку мотиваційну цитату українською (3-6 слів). "
+                f"Запит: '{caption}'. Тільки сам текст цитати, без лапок і пояснень."
             )
             texts_on_image = [new_quote.strip()]
             keep_text = True
 
-        # Генеруємо нове зображення — image-to-image через Stability AI
-        prompt = f"{new_style}, {orig_subject or 'motivational scene'}, high quality, detailed"
-        if orig_style:
-            prompt += f", different from {orig_style}"
+        # Будуємо якісний промпт
+        prompt = ask_ai(uid,
+            f"Create a detailed English image generation prompt based on:\n"
+            f"- Original style: {orig_style or 'anime/illustration'}\n"
+            f"- Subject: {orig_subject or 'people, urban scene'}\n"
+            f"- New style requested: {new_style}\n"
+            f"- User request: {caption}\n"
+            f"Return ONLY the prompt (max 100 words), no explanations. "
+            f"Include: style, lighting, composition, quality tags like 'highly detailed, 8k, cinematic'."
+        )
 
+        # image-to-image через Stability AI
         img_result = None
-        # Спробуємо image-to-image з оригінальним фото
         try:
             orig_r = requests.get(image_url, timeout=10)
             if orig_r.status_code == 200:
-                import base64 as _b64
-                img_b64 = _b64.b64encode(orig_r.content).decode()
                 r = requests.post(
                     "https://api.stability.ai/v2beta/stable-image/generate/sd3",
                     headers={"Authorization": f"Bearer {STABILITY_KEY}", "Accept": "image/*"},
@@ -4090,69 +4094,81 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     data={
                         "prompt": prompt,
                         "mode": "image-to-image",
-                        "strength": 0.7,
+                        "strength": 0.65,
                         "output_format": "jpeg",
                     },
-                    timeout=40
+                    timeout=45
                 )
                 if r.status_code == 200 and len(r.content) > 1000:
                     img_result = r.content
         except:
             pass
 
-        # Якщо image-to-image не спрацювало — звичайна генерація
         if not img_result:
             img_result = generate_image(prompt)
 
         if isinstance(img_result, bytes):
             img_data = img_result
-            img_data_url = None
         else:
-            img_data_url = img_result
             try:
-                r_img = requests.get(img_data_url, timeout=20)
-                img_data = r_img.content if r_img.status_code == 200 else None
+                img_data = requests.get(img_result, timeout=20).content
             except:
                 img_data = None
 
-        if keep_text and texts_on_image and img_data:
+        if not img_data:
+            await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
+            return
+
+        if keep_text and texts_on_image:
             try:
-                from PIL import Image, ImageDraw, ImageFont
+                from PIL import Image, ImageDraw, ImageFont, ImageFilter
                 import io as _io
+                import textwrap as _tw
+
                 img = Image.open(_io.BytesIO(img_data)).convert("RGB")
                 img = img.resize((1080, 1080))
-                overlay = Image.new("RGBA", img.size, (0,0,0,0))
+
+                # Красивий градієнт знизу
+                overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
                 draw_ov = ImageDraw.Draw(overlay)
-                for i in range(300):
-                    alpha = int(160 * (i/300))
-                    draw_ov.rectangle([(0, 780+i), (1080, 781+i)], fill=(0,0,0,alpha))
+                for i in range(400):
+                    alpha = int(200 * (i / 400) ** 1.5)
+                    draw_ov.rectangle([(0, 680 + i), (1080, 681 + i)], fill=(0, 0, 0, alpha))
                 img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
                 draw = ImageDraw.Draw(img)
                 try:
-                    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 56)
+                    font_big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 62)
+                    font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 36)
                 except:
-                    font = ImageFont.load_default()
-                y = 820
-                for t in texts_on_image[:3]:
-                    draw.text((42, y+2), t, font=font, fill=(0,0,0))
-                    draw.text((40, y), t, font=font, fill=(255,255,255))
-                    y += 70
+                    font_big = ImageFont.load_default()
+                    font_small = font_big
+
+                # Центруємо текст
+                full_text = " ".join(texts_on_image[:2])
+                wrapped = _tw.fill(full_text, width=22)
+                lines = wrapped.split("\n")
+                total_h = len(lines) * 75
+                y = 1080 - total_h - 60
+
+                for line in lines:
+                    # Тінь
+                    for dx, dy in [(-2,-2),(2,-2),(-2,2),(2,2),(0,3),(3,0)]:
+                        draw.text((540 + dx, y + dy), line, font=font_big, fill=(0, 0, 0, 200), anchor="mm")
+                    # Основний текст
+                    draw.text((540, y), line, font=font_big, fill=(255, 255, 255), anchor="mm")
+                    y += 75
+
                 buf = _io.BytesIO()
-                img.save(buf, format="JPEG", quality=92)
+                img.save(buf, format="JPEG", quality=95)
                 buf.seek(0)
                 await update.message.reply_photo(photo=buf)
-            except:
-                if img_data:
-                    buf = io.BytesIO(img_data); buf.name = "img.jpg"
-                    await update.message.reply_photo(photo=buf)
-                else:
-                    await update.message.reply_photo(photo=img_data_url)
-        else:
-            if isinstance(img_data, bytes) and img_data:
+            except Exception as e:
                 buf = io.BytesIO(img_data); buf.name = "img.jpg"
                 await update.message.reply_photo(photo=buf)
-            else:
-                await update.message.reply_photo(photo=img_data_url)
+        else:
+            buf = io.BytesIO(img_data); buf.name = "img.jpg"
+            await update.message.reply_photo(photo=buf)
         return
 
     # Їжа
