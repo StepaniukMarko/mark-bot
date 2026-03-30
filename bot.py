@@ -4063,23 +4063,24 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keep_text = "залиш текст" in caption_lower or "текст залиш" in caption_lower or "той самий текст" in caption_lower
 
         # Генеруємо нову цитату тільки якщо просять
+        new_quote_text = ""
         if any(w in caption_lower for w in ["цитата", "текст", "слова", "напис", "підпис"]):
-            new_quote = ask_ai(uid,
-                f"На основі цього запиту придумай одну коротку мотиваційну цитату українською (3-6 слів). "
-                f"Запит: '{caption}'. Тільки сам текст цитати, без лапок і пояснень."
+            new_quote_text = ask_ai(uid,
+                f"Придумай одну коротку мотиваційну цитату українською (3-6 слів). "
+                f"Тільки сам текст цитати, без лапок, без пояснень, без перекладу. "
+                f"Приклад: 'Не зупиняйся ніколи' або 'Дій і перемагай'. "
+                f"Тема: '{caption}'."
             )
-            texts_on_image = [new_quote.strip()]
+            # Очищаємо від зайвого
+            new_quote_text = new_quote_text.strip().strip('"').strip("'").split('\n')[0][:50]
+            texts_on_image = [new_quote_text]
             keep_text = True
 
-        # Будуємо якісний промпт
-        prompt = ask_ai(uid,
-            f"Create a detailed English image generation prompt based on:\n"
-            f"- Original style: {orig_style or 'anime/illustration'}\n"
-            f"- Subject: {orig_subject or 'people, urban scene'}\n"
-            f"- New style requested: {new_style}\n"
-            f"- User request: {caption}\n"
-            f"Return ONLY the prompt (max 100 words), no explanations. "
-            f"Include: style, lighting, composition, quality tags like 'highly detailed, 8k, cinematic'."
+        # Будуємо промпт для генерації (окремо від цитати)
+        gen_prompt = (
+            f"{new_style}, {orig_subject or 'people in urban scene'}, "
+            f"highly detailed, sharp, professional quality, cinematic lighting, 8k resolution, "
+            f"no text, no watermark, masterpiece"
         )
 
         # image-to-image через Stability AI
@@ -4092,9 +4093,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     headers={"Authorization": f"Bearer {STABILITY_KEY}", "Accept": "image/*"},
                     files={"image": ("image.jpg", orig_r.content, "image/jpeg")},
                     data={
-                        "prompt": prompt,
+                        "prompt": gen_prompt,
+                        "negative_prompt": "blurry, low quality, distorted, ugly, bad anatomy, watermark, text, signature",
                         "mode": "image-to-image",
-                        "strength": 0.65,
+                        "strength": 0.4,
                         "output_format": "jpeg",
                     },
                     timeout=45
@@ -4105,7 +4107,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         if not img_result:
-            img_result = generate_image(prompt)
+            img_result = generate_image(gen_prompt)
 
         if isinstance(img_result, bytes):
             img_data = img_result
