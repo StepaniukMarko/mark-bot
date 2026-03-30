@@ -4011,29 +4011,26 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Добре, аналізую фото і генерую нове. Зачекай ~20 секунд.")
 
         # Аналізуємо фото — витягуємо текст і стиль
-        analysis = analyze_image(image_url,
-            "Analyze this image and return JSON with these fields:\n"
-            "- texts: list of all text/words visible on the image\n"
-            "- style: visual style description in English (anime/realistic/cartoon etc)\n"
-            "- mood: mood/atmosphere in English\n"
-            "- subject: main subject in English\n"
-            "Return ONLY valid JSON, nothing else."
-        )
-
-        # Парсимо JSON з аналізу
         import re as _re, json as _json
         texts_on_image = []
-        orig_style = ""
-        orig_subject = ""
+        orig_style = "anime illustration"
+        orig_subject = "people, urban scene"
         try:
+            analysis = analyze_image(image_url,
+                "Analyze this image and return JSON with these fields:\n"
+                "- texts: list of all text/words visible on the image\n"
+                "- style: visual style description in English (anime/realistic/cartoon etc)\n"
+                "- subject: main subject in English\n"
+                "Return ONLY valid JSON, nothing else."
+            )
             j_match = _re.search(r'\{.*\}', analysis, _re.DOTALL)
             if j_match:
                 j = _json.loads(j_match.group())
                 texts_on_image = j.get("texts", [])
-                orig_style = j.get("style", "")
-                orig_subject = j.get("subject", "")
+                orig_style = j.get("style", orig_style)
+                orig_subject = j.get("subject", orig_subject)
         except:
-            pass
+            pass  # Продовжуємо без аналізу
 
         # Визначаємо новий стиль з підпису
         style_keywords = {
