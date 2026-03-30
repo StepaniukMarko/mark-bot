@@ -1951,41 +1951,43 @@ async def youtube_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if context.args:
         url = context.args[0]
-        await _summarize_youtube(update, uid, url)
+        await _summarize_youtube(update, uid, url, context)
     else:
         user_state[uid] = "youtube"
         await update.message.reply_text(
             "Вставте посилання на YouTube відео — я перекажу зміст:"
         )
 
-async def _summarize_youtube(update, uid: int, url: str):
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing") if hasattr(update, 'message') else None
-    # Витягуємо ID відео
+async def _summarize_youtube(update, uid: int, url: str, context=None):
     import re as _re
+    if context:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     vid_match = _re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
     if not vid_match:
         await update.message.reply_text("Не вдалося знайти відео. Перевір посилання.")
         return
     vid_id = vid_match.group(1)
-    # Отримуємо субтитри через безкоштовний API
     try:
         r = requests.get(
             f"https://www.youtube.com/watch?v={vid_id}",
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=10
         )
-        # Витягуємо назву
-        title_match = _re.search(r'"title":"([^"]+)"', r.text)
+        import re as _re2
+        title_match = _re2.search(r'"title":"([^"]+)"', r.text)
         title = title_match.group(1) if title_match else "YouTube відео"
-        # Просимо AI переказати по назві
+        # Витягуємо опис відео
+        desc_match = _re2.search(r'"shortDescription":"([^"]{0,500})"', r.text)
+        desc = desc_match.group(1).replace('\\n', ' ') if desc_match else ""
         result = ask_ai(uid,
-            f"Перекажи зміст YouTube відео з назвою: '{title}'. "
-            f"Якщо не знаєш точного змісту — скажи про що може бути це відео судячи з назви. "
-            f"Посилання: {url}"
+            f"Перекажи зміст YouTube відео.\n"
+            f"Назва: '{title}'\n"
+            f"Опис: '{desc}'\n"
+            f"Дай короткий переказ про що це відео (3-5 речень). Без зайвих слів."
         )
         await update.message.reply_text(f"YouTube: {title}\n\n{result}")
     except Exception as e:
-        await update.message.reply_text(f"Не вдалося отримати інформацію про відео: {e}")
+        await update.message.reply_text(f"Не вдалося отримати інформацію: {e}")
 
 async def calories_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -3454,7 +3456,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"🔗 Аналіз:\n\n{prefix}{part}")
         return
     if state == "youtube":
-        await _summarize_youtube(update, uid, text)
+        await _summarize_youtube(update, uid, text, context)
         return
     if state == "teach":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -3807,14 +3809,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     urls_in_text = _re.findall(r'https?://\S+', text)
     if urls_in_text:
         url_found = urls_in_text[0]
-        # Текст без URL — це задача від юзера
         task = text.replace(url_found, "").strip()
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        # YouTube — окрема обробка
+        if any(yt in url_found for yt in ["youtube.com", "youtu.be"]):
+            await _summarize_youtube(update, uid, url_found, context)
+            return
+
         page_text = fetch_url_text(url_found)
         if page_text.startswith("ERROR:"):
             page_text = f"Не вдалося відкрити сторінку: {url_found}"
         if task:
-            # Є конкретна задача — виконуємо її з контекстом сторінки
             prompt = (
                 f"Користувач надіслав посилання: {url_found}\n"
                 f"Вміст сторінки: {page_text[:2000]}\n\n"
@@ -3827,12 +3833,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
                 await update.message.reply_text(f"{prefix}{part}")
         else:
-            # Немає задачі — просто переказуємо
             result = ask_ai(uid, f"Зроби короткий переказ суті цієї сторінки (5-7 речень):\n\n{page_text}")
             parts = split_long_message(result)
             for i, part in enumerate(parts):
                 prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
-                await update.message.reply_text(f"🔗 Аналіз:\n\n{prefix}{part}")
+                await update.message.reply_text(f"{prefix}{part}")
         return
 
     # Автовизначення запиту на генерацію зображення
