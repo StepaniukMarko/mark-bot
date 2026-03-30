@@ -4094,7 +4094,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     files={"image": ("image.jpg", orig_r.content, "image/jpeg")},
                     data={
                         "prompt": gen_prompt,
-                        "negative_prompt": "blurry, low quality, distorted, ugly, bad anatomy, watermark, text, signature",
                         "mode": "image-to-image",
                         "strength": 0.4,
                         "output_format": "jpeg",
