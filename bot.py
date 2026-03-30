@@ -4089,16 +4089,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             orig_r = requests.get(image_url, timeout=10)
             if orig_r.status_code == 200:
                 r = requests.post(
-                    "https://api.stability.ai/v2beta/stable-image/generate/sd3",
+                    "https://api.stability.ai/v2beta/stable-image/generate/core",
                     headers={"Authorization": f"Bearer {STABILITY_KEY}", "Accept": "image/*"},
-                    files={"image": ("image.jpg", orig_r.content, "image/jpeg")},
+                    files={"none": ""},
                     data={
                         "prompt": gen_prompt,
-                        "mode": "image-to-image",
-                        "strength": 0.4,
                         "output_format": "jpeg",
                     },
-                    timeout=45
+                    timeout=40
                 )
                 if r.status_code == 200 and len(r.content) > 1000:
                     img_result = r.content
