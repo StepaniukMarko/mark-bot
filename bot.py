@@ -4062,14 +4062,31 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Зберігаємо текст з оригіналу якщо просять
         keep_text = "залиш текст" in caption_lower or "текст залиш" in caption_lower or "той самий текст" in caption_lower
 
+        # Якщо просять іншу цитату — генеруємо нову
+        if any(w in caption_lower for w in ["інша цитата", "інший текст", "інші слова", "змін текст", "інше слово"]):
+            new_quote = ask_ai(uid,
+                f"Придумай одну коротку мотиваційну цитату українською (максимум 5 слів). "
+                f"Тільки сам текст цитати, без лапок."
+            )
+            texts_on_image = [new_quote.strip()]
+            keep_text = True
+
         # Генеруємо нове зображення
         prompt = f"{new_style}, {orig_subject or 'motivational scene'}, high quality, detailed"
         if orig_style:
             prompt += f", different from {orig_style}"
 
-        img_data_url = generate_image(prompt)
-        r_img = requests.get(img_data_url, timeout=20)
-        img_data = r_img.content if r_img.status_code == 200 else None
+        img_result = generate_image(prompt)
+        if isinstance(img_result, bytes):
+            img_data = img_result
+            img_data_url = None
+        else:
+            img_data_url = img_result
+            try:
+                r_img = requests.get(img_data_url, timeout=20)
+                img_data = r_img.content if r_img.status_code == 200 else None
+            except:
+                img_data = None
 
         if keep_text and texts_on_image and img_data:
             try:
