@@ -37,6 +37,7 @@ HABITS_FILE    = "habits_tg.json"
 DIGEST_FILE    = "digest_tg.json"
 HF_TOKEN       = "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"
 STABILITY_KEY  = "sk-BhmOhn4eiBj5hEUE3WF5StJ60iRZ6QSwDErt3Gr4csvptG0z"
+TOGETHER_KEY   = "key_CZZo6AfLjQFmWppys8ZDj"
 ANTISPAM       : dict[int, list] = {}   # {user_id: [timestamps]}
 ADMIN_ID       = 1780948739
 
@@ -631,51 +632,33 @@ def analyze_image(image_url: str, question: str = "") -> str:
         return f"❌ Не вдалося розпізнати зображення. ({e})"
 
 def generate_image(prompt: str):
-    """Генерує зображення через Stability AI — повертає bytes або URL"""
-    # Покращуємо промпт через AI якщо він не англійський
-    import re as _re
+    """Генерує зображення через Pollinations AI"""
+    import re as _re, urllib.parse
+    # Перекладаємо якщо українська
     if _re.search(r'[а-яА-ЯіІїЇєЄ]', prompt):
         try:
             headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
             r = requests.post(GROQ_URL, headers=headers, json={
                 "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "user", "content":
-                    f"Translate this image description to English and make it a detailed, high-quality image generation prompt. "
-                    f"Add style details like 'photorealistic, 8k, detailed, beautiful lighting'. "
-                    f"Return ONLY the prompt, nothing else: {prompt}"}],
-                "max_tokens": 150, "temperature": 0.3
+                    f"Translate to English for image generation, add quality tags. Return ONLY the prompt: {prompt}"}],
+                "max_tokens": 100, "temperature": 0.3
             }, timeout=10)
             improved = r.json()["choices"][0]["message"]["content"].strip()
-            if improved:
+            if improved and not _re.search(r'[а-яА-ЯіІїЇєЄ]', improved):
                 prompt = improved
         except:
             pass
-    # Спроба 1: Stability AI
+    seed = random.randint(1, 99999)
+    encoded = urllib.parse.quote(prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}"
     try:
-        r = requests.post(
-            "https://api.stability.ai/v2beta/stable-image/generate/core",
-            headers={
-                "Authorization": f"Bearer {STABILITY_KEY}",
-                "Accept": "image/*"
-            },
-            files={"none": ""},
-            data={
-                "prompt": prompt,
-                "output_format": "jpeg",
-                "width": 1024,
-                "height": 1024,
-            },
-            timeout=30
-        )
+        r = requests.get(url, timeout=35)
         if r.status_code == 200 and len(r.content) > 1000:
             return r.content
     except:
         pass
-    # Запасний — Pollinations URL
-    import urllib.parse
-    seed = random.randint(1, 99999)
-    encoded = urllib.parse.quote(prompt)
-    return f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}"
+    return url  # Повертаємо URL якщо не вдалось завантажити
 
 def get_image_url(prompt: str) -> str:
     import urllib.parse
@@ -4080,28 +4063,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"no text, no watermark, masterpiece"
         )
 
-        # image-to-image через Stability AI
-        img_result = None
-        try:
-            orig_r = requests.get(image_url, timeout=10)
-            if orig_r.status_code == 200:
-                r = requests.post(
-                    "https://api.stability.ai/v2beta/stable-image/generate/core",
-                    headers={"Authorization": f"Bearer {STABILITY_KEY}", "Accept": "image/*"},
-                    files={"none": ""},
-                    data={
-                        "prompt": gen_prompt,
-                        "output_format": "jpeg",
-                    },
-                    timeout=40
-                )
-                if r.status_code == 200 and len(r.content) > 1000:
-                    img_result = r.content
-        except:
-            pass
-
-        if not img_result:
-            img_result = generate_image(gen_prompt)
+        # Генеруємо нове зображення
+        img_result = generate_image(gen_prompt)
 
         if isinstance(img_result, bytes):
             img_data = img_result
