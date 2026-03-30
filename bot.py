@@ -4071,12 +4071,39 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             texts_on_image = [new_quote.strip()]
             keep_text = True
 
-        # Генеруємо нове зображення
+        # Генеруємо нове зображення — image-to-image через Stability AI
         prompt = f"{new_style}, {orig_subject or 'motivational scene'}, high quality, detailed"
         if orig_style:
             prompt += f", different from {orig_style}"
 
-        img_result = generate_image(prompt)
+        img_result = None
+        # Спробуємо image-to-image з оригінальним фото
+        try:
+            orig_r = requests.get(image_url, timeout=10)
+            if orig_r.status_code == 200:
+                import base64 as _b64
+                img_b64 = _b64.b64encode(orig_r.content).decode()
+                r = requests.post(
+                    "https://api.stability.ai/v2beta/stable-image/generate/sd3",
+                    headers={"Authorization": f"Bearer {STABILITY_KEY}", "Accept": "image/*"},
+                    files={"image": ("image.jpg", orig_r.content, "image/jpeg")},
+                    data={
+                        "prompt": prompt,
+                        "mode": "image-to-image",
+                        "strength": 0.7,
+                        "output_format": "jpeg",
+                    },
+                    timeout=40
+                )
+                if r.status_code == 200 and len(r.content) > 1000:
+                    img_result = r.content
+        except:
+            pass
+
+        # Якщо image-to-image не спрацювало — звичайна генерація
+        if not img_result:
+            img_result = generate_image(prompt)
+
         if isinstance(img_result, bytes):
             img_data = img_result
             img_data_url = None
