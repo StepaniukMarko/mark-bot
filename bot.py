@@ -166,7 +166,7 @@ PAGE3_KB = ReplyKeyboardMarkup([
     ["🧠 Моя пам'ять",   "🔬 Глибокий аналіз", "⬅️ Назад"],
     ["🔗 Аналіз сайту",  "🎭 Дебати",  "🎬 Комікс",  "⬅️ Назад"],
     ["📓 Щоденник",      "💪 Звички",           "📋 Резюме/CV"],
-    ["🌅 Дайджест",      "📺 YouTube",          "⬅️ Назад"],
+    ["🌅 Дайджест",      "📺 YouTube",  "📥 Скачати відео", "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -3420,6 +3420,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await youtube_cmd(update, context)
         return
 
+    if text == "📥 Скачати відео":
+        user_state[uid] = "download_video"
+        await update.message.reply_text(
+            "Надішли посилання на відео:\n\n"
+            "Підтримую: TikTok, YouTube, Instagram Reels\n"
+            "Наприклад: https://vt.tiktok.com/..."
+        )
+        return
+
     if text == "🎭 Персонаж":
         await persona_cmd(update, context)
         return
@@ -3505,6 +3514,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "youtube":
         await _summarize_youtube(update, uid, text, context)
+        return
+    if state == "download_video":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_video")
+        await update.message.reply_text("Завантажую відео...")
+        result = download_video(text.strip())
+        if result.get("url"):
+            video_url = result["url"]
+            title = result.get("title", "Відео")
+            try:
+                vr = requests.get(video_url, timeout=30)
+                if vr.status_code == 200 and len(vr.content) > 1000:
+                    buf = io.BytesIO(vr.content)
+                    buf.name = "video.mp4"
+                    await update.message.reply_video(video=buf, caption=title[:200])
+                else:
+                    raise Exception("empty")
+            except:
+                await update.message.reply_text(
+                    "Відео готове:",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Завантажити", url=video_url)
+                    ]])
+                )
+        else:
+            await update.message.reply_text("Не вдалося завантажити. Перевір посилання.")
         return
     if state == "teach":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
