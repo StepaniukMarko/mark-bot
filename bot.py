@@ -147,7 +147,7 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
     ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
     ["🍽 Калорії",   "📊 Статистика","❓ Допомога"],
-    ["💪 Мотивація", "💻 Код",  "🖼 Цитата",  "➡️ Ще функції"],
+    ["💪 Мотивація", "💻 Код",  "🖼 Цитата",  "🎭 Персонаж", "➡️ Ще функції"],
 ], resize_keyboard=True)
 
 PAGE2_KB = ReplyKeyboardMarkup([
@@ -165,7 +165,7 @@ PAGE3_KB = ReplyKeyboardMarkup([
     ["🧠 Моя пам'ять",   "🔬 Глибокий аналіз", "⬅️ Назад"],
     ["🔗 Аналіз сайту",  "🎭 Дебати",  "🎬 Комікс",  "⬅️ Назад"],
     ["📓 Щоденник",      "💪 Звички",           "📋 Резюме/CV"],
-    ["🌅 Дайджест",      "⬅️ Назад"],
+    ["🌅 Дайджест",      "📺 YouTube",          "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -1907,6 +1907,210 @@ async def debate_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Назви тему для дебатів:"
         )
 
+async def youtube_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        url = context.args[0]
+        await _summarize_youtube(update, uid, url)
+    else:
+        user_state[uid] = "youtube"
+        await update.message.reply_text(
+            "Вставте посилання на YouTube відео — я перекажу зміст:"
+        )
+
+async def _summarize_youtube(update, uid: int, url: str):
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing") if hasattr(update, 'message') else None
+    # Витягуємо ID відео
+    import re as _re
+    vid_match = _re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
+    if not vid_match:
+        await update.message.reply_text("Не вдалося знайти відео. Перевір посилання.")
+        return
+    vid_id = vid_match.group(1)
+    # Отримуємо субтитри через безкоштовний API
+    try:
+        r = requests.get(
+            f"https://www.youtube.com/watch?v={vid_id}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10
+        )
+        # Витягуємо назву
+        title_match = _re.search(r'"title":"([^"]+)"', r.text)
+        title = title_match.group(1) if title_match else "YouTube відео"
+        # Просимо AI переказати по назві
+        result = ask_ai(uid,
+            f"Перекажи зміст YouTube відео з назвою: '{title}'. "
+            f"Якщо не знаєш точного змісту — скажи про що може бути це відео судячи з назви. "
+            f"Посилання: {url}"
+        )
+        await update.message.reply_text(f"YouTube: {title}\n\n{result}")
+    except Exception as e:
+        await update.message.reply_text(f"Не вдалося отримати інформацію про відео: {e}")
+
+async def calories_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        food = " ".join(context.args)
+        await _track_calories(update, uid, food)
+    else:
+        user_state[uid] = "calories_add"
+        await update.message.reply_text(
+            "Що ти їв? Напиши назву страви або продукту:\n"
+            "Наприклад: борщ 300г, або просто 'яблуко'"
+        )
+
+async def _track_calories(update, uid: int, food: str):
+    result = ask_ai(uid,
+        f"Визнач калорії для: '{food}'. "
+        f"Відповідь у форматі: Назва — X ккал (білки Xг, жири Xг, вуглеводи Xг). "
+        f"Тільки один рядок."
+    )
+    # Зберігаємо в файл
+    cal_file = f"calories_{uid}.json"
+    data = []
+    if os.path.exists(cal_file):
+        try:
+            data = json.load(open(cal_file, encoding='utf-8'))
+        except:
+            pass
+    today = datetime.now().strftime("%Y-%m-%d")
+    data.append({"date": today, "food": food, "info": result})
+    json.dump(data, open(cal_file, 'w', encoding='utf-8'), ensure_ascii=False)
+    # Рахуємо за сьогодні
+    today_items = [d for d in data if d.get("date") == today]
+    await update.message.reply_text(
+        f"{result}\n\nЗаписано. Сьогодні записів: {len(today_items)}\n"
+        f"Напиши /calories_today щоб побачити все за день."
+    )
+
+async def calories_today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    cal_file = f"calories_{uid}.json"
+    if not os.path.exists(cal_file):
+        await update.message.reply_text("Ще нічого не записано. Напиши /calories їжа")
+        return
+    data = json.load(open(cal_file, encoding='utf-8'))
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_items = [d for d in data if d.get("date") == today]
+    if not today_items:
+        await update.message.reply_text("Сьогодні ще нічого не записано.")
+        return
+    lines = [f"Трекер калорій за {today}:\n"]
+    for i, item in enumerate(today_items, 1):
+        lines.append(f"{i}. {item['info']}")
+    await update.message.reply_text("\n".join(lines))
+
+async def tiktok_post_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        topic = " ".join(context.args)
+        await _generate_tiktok_post(update, uid, topic)
+    else:
+        user_state[uid] = "tiktok_post"
+        await update.message.reply_text(
+            "На яку тему зробити пост для TikTok/Instagram?\n"
+            "Наприклад: мотивація, бізнес, спорт, їжа"
+        )
+
+async def _generate_tiktok_post(update, uid: int, topic: str):
+    result = ask_ai(uid,
+        f"Створи вірусний пост для TikTok/Instagram на тему '{topic}'.\n"
+        f"Структура:\n"
+        f"1. Чіпляючий заголовок (1 рядок)\n"
+        f"2. Текст поста (3-5 речень)\n"
+        f"3. Заклик до дії\n"
+        f"4. 10 хештегів\n"
+        f"Без зірочок і Markdown."
+    )
+    await update.message.reply_text(result)
+
+async def mbti_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "mbti_1"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Інтроверт (I)", callback_data="mbti|I"),
+         InlineKeyboardButton("Екстраверт (E)", callback_data="mbti|E")],
+    ])
+    await update.message.reply_text(
+        "Тест на тип особистості!\n\n"
+        "Питання 1/4: Як ти відновлюєш енергію?",
+        reply_markup=kb
+    )
+
+async def mbti_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    data = q.data.split("|")[1]
+    state = user_state.get(uid, "")
+    if not state.startswith("mbti"):
+        return
+    # Зберігаємо відповіді
+    answers = context.user_data.get("mbti_answers", "")
+    answers += data
+    context.user_data["mbti_answers"] = answers
+    step = len(answers)
+    if step == 1:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Факти і деталі (S)", callback_data="mbti|S"),
+             InlineKeyboardButton("Ідеї і можливості (N)", callback_data="mbti|N")],
+        ])
+        await q.edit_message_text("Питання 2/4: На що ти більше звертаєш увагу?", reply_markup=kb)
+    elif step == 2:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Логіка (T)", callback_data="mbti|T"),
+             InlineKeyboardButton("Почуття (F)", callback_data="mbti|F")],
+        ])
+        await q.edit_message_text("Питання 3/4: Як ти приймаєш рішення?", reply_markup=kb)
+    elif step == 3:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Планую заздалегідь (J)", callback_data="mbti|J"),
+             InlineKeyboardButton("Дію за ситуацією (P)", callback_data="mbti|P")],
+        ])
+        await q.edit_message_text("Питання 4/4: Як ти організовуєш своє життя?", reply_markup=kb)
+    elif step == 4:
+        mbti_type = answers
+        context.user_data["mbti_answers"] = ""
+        user_state.pop(uid, None)
+        result = ask_ai(uid,
+            f"Опиши тип особистості MBTI: {mbti_type}. "
+            f"Включи: назву типу, сильні сторони, слабкі сторони, підходящі професії, "
+            f"відомі люди з цим типом. Без зірочок."
+        )
+        await q.edit_message_text(f"Твій тип: {mbti_type}\n\n{result}")
+
+async def persona_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Ілон Маск", callback_data="persona|Elon Musk"),
+         InlineKeyboardButton("Стів Джобс", callback_data="persona|Steve Jobs")],
+        [InlineKeyboardButton("Альберт Ейнштейн", callback_data="persona|Albert Einstein"),
+         InlineKeyboardButton("Наполеон", callback_data="persona|Napoleon Bonaparte")],
+        [InlineKeyboardButton("Шевченко", callback_data="persona|Taras Shevchenko"),
+         InlineKeyboardButton("Зеленський", callback_data="persona|Volodymyr Zelensky")],
+        [InlineKeyboardButton("Вийти з режиму", callback_data="persona|exit")],
+    ])
+    await update.message.reply_text(
+        "Обери з ким поговорити — я буду відповідати від їх імені:",
+        reply_markup=kb
+    )
+
+async def persona_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    person = q.data.split("|")[1]
+    if person == "exit":
+        user_state.pop(uid, None)
+        await q.edit_message_text("Вийшов з режиму персонажа.")
+        return
+    user_state[uid] = f"persona_{person}"
+    await q.edit_message_text(
+        f"Тепер я відповідаю як {person}.\n"
+        f"Запитай мене про що завгодно!\n\n"
+        f"Напиши /persona щоб змінити персонажа."
+    )
+
 async def leaderboard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     refs = load_refs()
     if not refs:
@@ -3027,6 +3231,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await digest_cmd(update, context)
         return
 
+    if text == "📺 YouTube":
+        await youtube_cmd(update, context)
+        return
+
+    if text == "🎭 Персонаж":
+        await persona_cmd(update, context)
+        return
+
     if text == "�🔮 Гороскоп":
         await horoscope_cmd(update, context)
         return
@@ -3102,9 +3314,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
                 await update.message.reply_text(f"🔗 Аналіз:\n\n{prefix}{part}")
         return
-    if state == "diary":
-        save_diary_entry(uid, text)
-        await update.message.reply_text("Записано в щоденник.")
+    if state == "youtube":
+        await _summarize_youtube(update, uid, text)
+        return
+    if state == "calories_add":
+        await _track_calories(update, uid, text)
+        return
+    if state == "tiktok_post":
+        await _generate_tiktok_post(update, uid, text)
+        return
+    if state and state.startswith("persona_"):
+        person = state[8:]
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        reply = ask_ai(uid,
+            f"Ти — {person}. Відповідай ТІЛЬКИ від імені цієї людини, "
+            f"використовуй їх стиль мовлення, цінності та погляди. "
+            f"Питання: {text}"
+        )
+        await update.message.reply_text(reply)
         return
     if state == "comic":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
@@ -3286,7 +3513,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
         url = generate_image(text)
-        await update.message.reply_photo(photo=url, caption=f"🎨 {text[:100]}")
+        await update.message.reply_text("🎨 Зображення готове:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=url)]]))
         return
     if state == "music":
         import urllib.parse
@@ -3453,7 +3680,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for prompt in prompts:
             try:
                 url = generate_image(prompt)
-                await update.message.reply_photo(photo=url)
+                await update.message.reply_text(f"🎨 {i+1}:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=url)]]))
                 sent += 1
                 await asyncio.sleep(1)
             except Exception as e:
@@ -3561,7 +3788,7 @@ async def imagine_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         await update.message.reply_text("Добре, генерую. Зачекай ~10 секунд.")
         url = generate_image(prompt)
-        await update.message.reply_photo(photo=url, caption=f"🎨 {prompt[:100]}")
+        await update.message.reply_text("🎨 Зображення готове:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=url)]]))
     else:
         user_state[update.effective_user.id] = "imagine"
         await update.message.reply_text("🎨 Опиши що намалювати (англійською краще):\nНаприклад: `beautiful sunset over mountains`", parse_mode="Markdown")
@@ -3681,9 +3908,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     buf = io.BytesIO(img_data); buf.name = "img.jpg"
                     await update.message.reply_photo(photo=buf)
                 else:
-                    await update.message.reply_photo(photo=img_data_url)
+                    await update.message.reply_text("🎨 Зображення:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=img_data_url)]]))
         else:
-            await update.message.reply_photo(photo=img_data_url)
+            await update.message.reply_text("🎨 Зображення:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=img_data_url)]]))
         return
 
     # Їжа
@@ -3834,6 +4061,8 @@ if __name__ == "__main__":
         ("url", url_cmd), ("debate", debate_cmd), ("leaderboard", leaderboard_cmd),
         ("diary", diary_cmd), ("habits", habits_cmd), ("digest", digest_cmd), ("cv", cv_cmd),
         ("quote", quote_cmd), ("comic", comic_cmd),
+        ("youtube", youtube_cmd), ("calories", calories_cmd), ("calories_today", calories_today_cmd),
+        ("tiktok", tiktok_post_cmd), ("mbti", mbti_cmd), ("persona", persona_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -3860,6 +4089,8 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(diary_callback,        pattern="^diary\\|"))
     app.add_handler(CallbackQueryHandler(habits_callback,       pattern="^habit\\|"))
     app.add_handler(CallbackQueryHandler(digest_callback,       pattern="^digest\\|"))
+    app.add_handler(CallbackQueryHandler(mbti_callback,         pattern="^mbti\\|"))
+    app.add_handler(CallbackQueryHandler(persona_callback,      pattern="^persona\\|"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
