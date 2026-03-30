@@ -632,7 +632,25 @@ def analyze_image(image_url: str, question: str = "") -> str:
 
 def generate_image(prompt: str):
     """Генерує зображення через Stability AI — повертає bytes або URL"""
-    # Спроба 1: Stability AI (найкраща якість)
+    # Покращуємо промпт через AI якщо він не англійський
+    import re as _re
+    if _re.search(r'[а-яА-ЯіІїЇєЄ]', prompt):
+        try:
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+            r = requests.post(GROQ_URL, headers=headers, json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content":
+                    f"Translate this image description to English and make it a detailed, high-quality image generation prompt. "
+                    f"Add style details like 'photorealistic, 8k, detailed, beautiful lighting'. "
+                    f"Return ONLY the prompt, nothing else: {prompt}"}],
+                "max_tokens": 150, "temperature": 0.3
+            }, timeout=10)
+            improved = r.json()["choices"][0]["message"]["content"].strip()
+            if improved:
+                prompt = improved
+        except:
+            pass
+    # Спроба 1: Stability AI
     try:
         r = requests.post(
             "https://api.stability.ai/v2beta/stable-image/generate/core",
@@ -653,7 +671,7 @@ def generate_image(prompt: str):
             return r.content
     except:
         pass
-    # Запасний — Pollinations URL (Telegram завантажить сам)
+    # Запасний — Pollinations URL
     import urllib.parse
     seed = random.randint(1, 99999)
     encoded = urllib.parse.quote(prompt)
@@ -3820,8 +3838,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Автовизначення запиту на генерацію зображення
     img_triggers = [
         "намалюй", "згенеруй картинку", "згенеруй фото", "згенеруй зображення",
-        "зроби зображення", "зроби фото", "зроби картинку",
-        "generate image", "draw", "створи зображення", "створи картинку"
+        "зроби зображення", "зроби фото", "зроби картинку", "хочу фото",
+        "хочу картинку", "хочу зображення", "покажи фото", "покажи картинку",
+        "створи зображення", "створи картинку", "створи фото",
+        "generate image", "draw", "create image", "make image",
+        "зобрази", "намали", "зроби малюнок", "хочу малюнок",
+        "картинка з", "фото з", "зображення з",
     ]
     # Перевіряємо чи є запит на кілька зображень
     multi_img = any(w in text_lower for w in ["5 фото", "5 картинок", "5 зображень", "кілька фото",
@@ -3852,7 +3874,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Не вдалося згенерувати. Спробуй ще раз.")
         return
 
-    if any(text_lower.startswith(t) for t in img_triggers) or any(t in text_lower for t in img_triggers[:6]):
+    if any(t in text_lower for t in img_triggers):
         # Знаходимо що саме генерувати
         prompt = text
         for t in sorted(img_triggers, key=len, reverse=True):
