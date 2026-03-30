@@ -650,11 +650,10 @@ def generate_image(prompt: str):
         except:
             pass
     seed = random.randint(1, 99999)
-    encoded = urllib.parse.quote(prompt)
-    # Генеруємо трохи більше щоб обрізати watermark знизу
+    encoded = urllib.parse.quote(prompt[:300])  # обмежуємо довжину промпту
     url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1100&nologo=true&seed={seed}"
     try:
-        r = requests.get(url, timeout=35)
+        r = requests.get(url, timeout=60)  # збільшуємо таймаут до 60 сек
         if r.status_code == 200 and len(r.content) > 1000:
             # Обрізаємо нижні 80px де watermark
             try:
@@ -3682,13 +3681,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "imagine":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-        await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
-        img = generate_image(text)
+        await update.message.reply_text("Генерую, зачекай до 60 секунд.")
+        # Беремо тільки суть — перші 100 символів
+        clean_prompt = text[:100]
+        img = generate_image(clean_prompt)
         if isinstance(img, bytes):
             buf = io.BytesIO(img); buf.name = "img.jpg"
-            await update.message.reply_photo(photo=buf, caption=f"🎨 {text[:100]}")
+            await update.message.reply_photo(photo=buf)
         else:
-            await update.message.reply_photo(photo=img, caption=f"🎨 {text[:100]}")
+            await update.message.reply_photo(photo=img)
         return
     if state == "music":
         import urllib.parse
