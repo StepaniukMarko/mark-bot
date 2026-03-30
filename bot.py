@@ -651,14 +651,27 @@ def generate_image(prompt: str):
             pass
     seed = random.randint(1, 99999)
     encoded = urllib.parse.quote(prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true&seed={seed}"
+    # Генеруємо трохи більше щоб обрізати watermark знизу
+    url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1100&nologo=true&seed={seed}"
     try:
         r = requests.get(url, timeout=35)
         if r.status_code == 200 and len(r.content) > 1000:
-            return r.content
+            # Обрізаємо нижні 80px де watermark
+            try:
+                from PIL import Image as _PIL
+                img = _PIL.open(io.BytesIO(r.content))
+                w, h = img.size
+                img = img.crop((0, 0, w, h - 80))
+                img = img.resize((1024, 1024))
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=95)
+                buf.seek(0)
+                return buf.read()
+            except:
+                return r.content
     except:
         pass
-    return url  # Повертаємо URL якщо не вдалось завантажити
+    return url
 
 def get_image_url(prompt: str) -> str:
     import urllib.parse
