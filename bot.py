@@ -839,6 +839,59 @@ def check_limit(user_id: int) -> tuple[bool, int]:
 # ══════════════════════════════════════
 #  АНАЛІЗ ПОСИЛАНЬ
 # ══════════════════════════════════════
+def download_video(url: str) -> dict:
+    """Завантажує відео з TikTok/YouTube/Instagram без водяних знаків"""
+    import re as _re
+
+    # TikTok — через tikwm.com API
+    if "tiktok.com" in url or "vm.tiktok" in url or "vt.tiktok" in url:
+        try:
+            r = requests.post(
+                "https://www.tikwm.com/api/",
+                data={"url": url, "hd": 1},
+                timeout=15
+            )
+            data = r.json()
+            if data.get("code") == 0:
+                video_data = data.get("data", {})
+                video_url = video_data.get("hdplay") or video_data.get("play")
+                title = video_data.get("title", "TikTok відео")
+                if video_url:
+                    return {"url": video_url, "title": title, "source": "TikTok"}
+        except:
+            pass
+
+    # YouTube — через yt-dlp API (cobalt.tools)
+    if "youtube.com" in url or "youtu.be" in url:
+        try:
+            r = requests.post(
+                "https://api.cobalt.tools/api/json",
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                json={"url": url, "vQuality": "720", "isAudioOnly": False},
+                timeout=15
+            )
+            data = r.json()
+            if data.get("status") in ("redirect", "stream", "tunnel"):
+                return {"url": data.get("url"), "title": "YouTube відео", "source": "YouTube"}
+        except:
+            pass
+
+    # Загальний — cobalt.tools для будь-якого сайту
+    try:
+        r = requests.post(
+            "https://api.cobalt.tools/api/json",
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            json={"url": url, "vQuality": "720"},
+            timeout=15
+        )
+        data = r.json()
+        if data.get("status") in ("redirect", "stream", "tunnel"):
+            return {"url": data.get("url"), "title": "Відео", "source": "Web"}
+    except:
+        pass
+
+    return {}
+
 def fetch_url_text(url: str) -> str:
     """Завантажує текст сторінки"""
     try:
@@ -3808,6 +3861,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url_found = urls_in_text[0]
         task = text.replace(url_found, "").strip()
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        # Перевіряємо чи є запит на скачування відео
+        download_triggers = ["скачай", "скачати", "завантаж", "завантажити", "скинь відео",
+                             "без водяних знаків", "без вотермарки", "download", "скачай відео"]
+        is_download = any(t in text_lower for t in download_triggers)
+
+        if is_download or any(s in url_found for s in ["tiktok.com", "vm.tiktok", "vt.tiktok",
+                                                        "instagram.com", "reels"]):
+            await update.message.reply_text("Завантажую відео...")
+            result = download_video(url_found)
+            if result.get("url"):
+                video_url = result["url"]
+                title = result.get("title", "Відео")
+                try:
+                    # Завантажуємо і надсилаємо
+                    vr = requests.get(video_url, timeout=30, stream=True)
+                    if vr.status_code == 200:
+                        buf = io.BytesIO(vr.content)
+                        buf.name = "video.mp4"
+                        await update.message.reply_video(video=buf, caption=title[:200])
+                    else:
+                        await update.message.reply_text(
+                            f"Відео готове, відкрий напряму:",
+                            reply_markup=InlineKeyboardMarkup([[
+                                InlineKeyboardButton("Завантажити відео", url=video_url)
+                            ]])
+                        )
+                except:
+                    await update.message.reply_text(
+                        "Відео готове:",
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("Завантажити відео", url=video_url)
+                        ]])
+                    )
+            else:
+                await update.message.reply_text(
+                    "Не вдалося завантажити. Спробуй скопіювати посилання напряму."
+                )
+            return
 
         # YouTube — окрема обробка
         if any(yt in url_found for yt in ["youtube.com", "youtu.be"]):
