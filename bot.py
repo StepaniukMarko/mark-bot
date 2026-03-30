@@ -36,6 +36,7 @@ DIARY_FILE     = "diary_tg.json"
 HABITS_FILE    = "habits_tg.json"
 DIGEST_FILE    = "digest_tg.json"
 HF_TOKEN       = "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"
+STABILITY_KEY  = "sk-BhmOhn4eiBj5hEUE3WF5StJ60iRZ6QSwDErt3Gr4csvptG0z"
 ANTISPAM       : dict[int, list] = {}   # {user_id: [timestamps]}
 ADMIN_ID       = 1780948739
 
@@ -147,8 +148,7 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
     ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
     ["🍽 Калорії",   "📊 Статистика","❓ Допомога"],
-    ["💪 Мотивація", "💻 Код",  "🖼 Цитата",  "🎭 Персонаж", "➡️ Ще функції"],
-], resize_keyboard=True)
+    ["💪 Мотивація", "💻 Код",  "🖼 Цитата",  "🎭 Персонаж", "➡️ Ще функції"],], resize_keyboard=True)
 
 PAGE2_KB = ReplyKeyboardMarkup([
     ["⭐ Купити Преміум", "👥 Реферали"],
@@ -631,7 +631,29 @@ def analyze_image(image_url: str, question: str = "") -> str:
         return f"❌ Не вдалося розпізнати зображення. ({e})"
 
 def generate_image(prompt: str):
-    """Повертає URL зображення — Telegram завантажить сам"""
+    """Генерує зображення через Stability AI — повертає bytes або URL"""
+    # Спроба 1: Stability AI (найкраща якість)
+    try:
+        r = requests.post(
+            "https://api.stability.ai/v2beta/stable-image/generate/core",
+            headers={
+                "Authorization": f"Bearer {STABILITY_KEY}",
+                "Accept": "image/*"
+            },
+            files={"none": ""},
+            data={
+                "prompt": prompt,
+                "output_format": "jpeg",
+                "width": 1024,
+                "height": 1024,
+            },
+            timeout=30
+        )
+        if r.status_code == 200 and len(r.content) > 1000:
+            return r.content
+    except:
+        pass
+    # Запасний — Pollinations URL (Telegram завантажить сам)
     import urllib.parse
     seed = random.randint(1, 99999)
     encoded = urllib.parse.quote(prompt)
@@ -2079,6 +2101,101 @@ async def mbti_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await q.edit_message_text(f"Твій тип: {mbti_type}\n\n{result}")
 
+async def teach_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        topic = " ".join(context.args)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Поясни тему '{topic}' максимально просто, як для 10-річної дитини. "
+            f"Використовуй прості слова, аналогії з реального життя, приклади. "
+            f"Структура: 1) Що це таке (1-2 речення) 2) Як це працює (простий приклад) "
+            f"3) Навіщо це потрібно. Без зірочок."
+        )
+        parts = split_long_message(result)
+        for i, part in enumerate(parts):
+            await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}" if len(parts) > 1 else part)
+    else:
+        user_state[uid] = "teach"
+        await update.message.reply_text(
+            "Режим вчителя — поясню будь-яку тему простими словами.\n\n"
+            "Що пояснити? Наприклад: квантова фізика, блокчейн, ШІ, фотосинтез"
+        )
+
+async def ad_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Адмін: налаштування реклами"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Немає доступу.")
+        return
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Надіслати рекламу зараз", callback_data="ad|send")],
+        [InlineKeyboardButton("Встановити авторекламу", callback_data="ad|auto")],
+    ])
+    await update.message.reply_text(
+        "Рекламна панель:\n\n"
+        "Реклама надсилається всім юзерам раз на день.",
+        reply_markup=kb
+    )
+
+async def ad_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    if q.from_user.id != ADMIN_ID:
+        return
+    action = q.data.split("|")[1]
+    if action == "send":
+        user_state[q.from_user.id] = "ad_text"
+        await q.edit_message_text(
+            "Напиши рекламний текст (можна з посиланням).\n"
+            "Він буде надісланий всім юзерам:"
+        )
+    elif action == "auto":
+        user_state[q.from_user.id] = "ad_auto"
+        await q.edit_message_text(
+            "Напиши рекламний текст для щоденної авторозсилки.\n"
+            "Буде надсилатись раз на день о 12:00:"
+        )
+
+async def realtime_stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Немає доступу.")
+        return
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    hour_ago = now.replace(minute=0, second=0).strftime("%Y-%m-%d %H:")
+    users = {}
+    if os.path.exists(USERS_FILE):
+        try:
+            users = json.load(open(USERS_FILE, encoding='utf-8'))
+        except:
+            pass
+    msg_today = 0
+    msg_hour = 0
+    active_today = set()
+    if os.path.exists(DIALOG_FILE):
+        try:
+            history = json.load(open(DIALOG_FILE, encoding='utf-8'))
+            for e in history:
+                if e.get("role") == "user":
+                    d = e.get("date", "")
+                    if d.startswith(today):
+                        msg_today += 1
+                        active_today.add(e.get("user_id"))
+                    if d.startswith(hour_ago):
+                        msg_hour += 1
+        except:
+            pass
+    premium_count = sum(1 for uid in users if is_premium(int(uid)))
+    await update.message.reply_text(
+        f"Статистика в реальному часі:\n\n"
+        f"Всього юзерів: {len(users)}\n"
+        f"Преміум: {premium_count}\n"
+        f"Активних сьогодні: {len(active_today)}\n"
+        f"Повідомлень сьогодні: {msg_today}\n"
+        f"Повідомлень за останню годину: {msg_hour}\n"
+        f"Активних сесій зараз: {len(user_histories)}"
+    )
+
 async def persona_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     kb = InlineKeyboardMarkup([
@@ -3239,6 +3356,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await persona_cmd(update, context)
         return
 
+    if text == "📚 Вчитель":
+        await teach_cmd(update, context)
+        return
+
     if text == "�🔮 Гороскоп":
         await horoscope_cmd(update, context)
         return
@@ -3316,6 +3437,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "youtube":
         await _summarize_youtube(update, uid, text)
+        return
+    if state == "teach":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Поясни тему '{text}' максимально просто, як для 10-річної дитини. "
+            f"Використовуй прості слова, аналогії, приклади. Без зірочок."
+        )
+        parts = split_long_message(result)
+        for i, part in enumerate(parts):
+            await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}" if len(parts) > 1 else part)
+        return
+    if state == "ad_text":
+        # Надсилаємо рекламу всім
+        users = {}
+        if os.path.exists(USERS_FILE):
+            try:
+                users = json.load(open(USERS_FILE, encoding='utf-8'))
+            except:
+                pass
+        sent = 0
+        for uid_str in users:
+            try:
+                await context.bot.send_message(chat_id=int(uid_str), text=f"📢 {text}")
+                sent += 1
+                await asyncio.sleep(0.05)
+            except:
+                pass
+        await update.message.reply_text(f"Реклама надіслана {sent} юзерам.")
+        return
+    if state == "ad_auto":
+        # Зберігаємо авторекламу
+        json.dump({"text": text, "enabled": True},
+                  open("ad_auto.json", "w", encoding="utf-8"), ensure_ascii=False)
+        await update.message.reply_text("Авторекламу збережено. Буде надсилатись щодня о 12:00.")
         return
     if state == "calories_add":
         await _track_calories(update, uid, text)
@@ -3512,8 +3667,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "imagine":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         await update.message.reply_text("Добре, генерую зображення. Зачекай ~15 секунд.")
-        url = generate_image(text)
-        await update.message.reply_text("🎨 Зображення готове:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=url)]]))
+        img = generate_image(text)
+        if isinstance(img, bytes):
+            buf = io.BytesIO(img); buf.name = "img.jpg"
+            await update.message.reply_photo(photo=buf, caption=f"🎨 {text[:100]}")
+        else:
+            await update.message.reply_photo(photo=img, caption=f"🎨 {text[:100]}")
         return
     if state == "music":
         import urllib.parse
@@ -3679,8 +3838,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sent = 0
         for prompt in prompts:
             try:
-                url = generate_image(prompt)
-                await update.message.reply_text(f"🎨 {i+1}:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=url)]]))
+                img = generate_image(prompt)
+                if isinstance(img, bytes):
+                    buf = io.BytesIO(img); buf.name = "img.jpg"
+                    await update.message.reply_photo(photo=buf)
+                else:
+                    await update.message.reply_photo(photo=img)
                 sent += 1
                 await asyncio.sleep(1)
             except Exception as e:
@@ -3787,8 +3950,12 @@ async def imagine_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompt = " ".join(context.args)
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         await update.message.reply_text("Добре, генерую. Зачекай ~10 секунд.")
-        url = generate_image(prompt)
-        await update.message.reply_text("🎨 Зображення готове:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=url)]]))
+        img = generate_image(prompt)
+        if isinstance(img, bytes):
+            buf = io.BytesIO(img); buf.name = "img.jpg"
+            await update.message.reply_photo(photo=buf, caption=f"🎨 {prompt[:100]}")
+        else:
+            await update.message.reply_photo(photo=img, caption=f"🎨 {prompt[:100]}")
     else:
         user_state[update.effective_user.id] = "imagine"
         await update.message.reply_text("🎨 Опиши що намалювати (англійською краще):\nНаприклад: `beautiful sunset over mountains`", parse_mode="Markdown")
@@ -3908,9 +4075,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     buf = io.BytesIO(img_data); buf.name = "img.jpg"
                     await update.message.reply_photo(photo=buf)
                 else:
-                    await update.message.reply_text("🎨 Зображення:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=img_data_url)]]))
+                    await update.message.reply_photo(photo=img_data_url)
         else:
-            await update.message.reply_text("🎨 Зображення:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Переглянути", url=img_data_url)]]))
+            if isinstance(img_data, bytes) and img_data:
+                buf = io.BytesIO(img_data); buf.name = "img.jpg"
+                await update.message.reply_photo(photo=buf)
+            else:
+                await update.message.reply_photo(photo=img_data_url)
         return
 
     # Їжа
@@ -4063,6 +4234,7 @@ if __name__ == "__main__":
         ("quote", quote_cmd), ("comic", comic_cmd),
         ("youtube", youtube_cmd), ("calories", calories_cmd), ("calories_today", calories_today_cmd),
         ("tiktok", tiktok_post_cmd), ("mbti", mbti_cmd), ("persona", persona_cmd),
+        ("teach", teach_cmd), ("ad", ad_cmd), ("rstats", realtime_stats_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -4091,6 +4263,7 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(digest_callback,       pattern="^digest\\|"))
     app.add_handler(CallbackQueryHandler(mbti_callback,         pattern="^mbti\\|"))
     app.add_handler(CallbackQueryHandler(persona_callback,      pattern="^persona\\|"))
+    app.add_handler(CallbackQueryHandler(ad_callback,           pattern="^ad\\|"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
@@ -4142,6 +4315,24 @@ if __name__ == "__main__":
                             save_digest_settings(settings)
                         except:
                             pass
+            except:
+                pass
+            # Авторозсилка реклами о 12:00
+            try:
+                if now.hour == 12 and now.minute == 0:
+                    ad_file = "ad_auto.json"
+                    if os.path.exists(ad_file):
+                        ad_data = json.load(open(ad_file, encoding='utf-8'))
+                        if ad_data.get("enabled") and ad_data.get("last_sent") != today:
+                            users = json.load(open(USERS_FILE, encoding='utf-8')) if os.path.exists(USERS_FILE) else {}
+                            for uid_str in users:
+                                try:
+                                    await app.bot.send_message(chat_id=int(uid_str), text=f"📢 {ad_data['text']}")
+                                    await asyncio.sleep(0.05)
+                                except:
+                                    pass
+                            ad_data["last_sent"] = today
+                            json.dump(ad_data, open(ad_file, 'w', encoding='utf-8'), ensure_ascii=False)
             except:
                 pass
             await asyncio.sleep(60)
