@@ -38,6 +38,7 @@ DIGEST_FILE    = "digest_tg.json"
 HF_TOKEN       = "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"
 STABILITY_KEY  = "sk-BhmOhn4eiBj5hEUE3WF5StJ60iRZ6QSwDErt3Gr4csvptG0z"
 TOGETHER_KEY   = "key_CZZo6AfLjQFmWppys8ZDj"
+CHANNEL_ID     = "@MARK_AI_STEPANIUK"
 ANTISPAM       : dict[int, list] = {}   # {user_id: [timestamps]}
 ADMIN_ID       = 1780948739
 
@@ -159,7 +160,7 @@ PAGE2_KB = ReplyKeyboardMarkup([
     ["🌐 Мова AI",       "📋 Шпаргалка",  "✍️ Граматика"],
     ["📱 Пост",          "💡 Бізнес-ідея","💰 Витрати"],
     ["🧠 Вікторина",     "💑 Сумісність", "😂 Мем"],
-    ["📅 Розклад",       "🏆 Лідерборд",  "➡️ Сторінка 3", "⬅️ Назад"],], resize_keyboard=True)
+    ["📅 Розклад",       "🏆 Лідерборд",  "🎯 Заголовки", "➡️ Сторінка 3", "⬅️ Назад"],], resize_keyboard=True)
 
 PAGE3_KB = ReplyKeyboardMarkup([
     ["🍅 Помодоро",      "🎮 Нікнейм",    "🌐 Перевірка сайту"],
@@ -2170,6 +2171,177 @@ async def mbti_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await q.edit_message_text(f"Твій тип: {mbti_type}\n\n{result}")
 
+async def viral_title_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        topic = " ".join(context.args)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Згенеруй 5 вірусних заголовків для TikTok/YouTube відео на тему '{topic}'. "
+            f"Кожен заголовок з нового рядка. Без нумерації. "
+            f"Заголовки мають бути чіпляючими, інтригуючими, змушувати клікнути."
+        )
+        await update.message.reply_text(f"Вірусні заголовки для '{topic}':\n\n{result}")
+    else:
+        user_state[uid] = "viral_title"
+        await update.message.reply_text("На яку тему відео? Напиши тему:")
+
+async def coach_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "coach"
+    context.user_data["coach_step"] = 0
+    await update.message.reply_text(
+        "Режим коуча активовано!\n\n"
+        "Я допоможу тобі досягти цілі через серію питань.\n\n"
+        "Яку ціль ти хочеш досягти?"
+    )
+
+async def channel_post_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Немає доступу.")
+        return
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Факт дня", callback_data="chpost|fact"),
+         InlineKeyboardButton("Порада дня", callback_data="chpost|tip")],
+        [InlineKeyboardButton("Мотивація", callback_data="chpost|motivate"),
+         InlineKeyboardButton("Свій текст", callback_data="chpost|custom")],
+    ])
+    await update.message.reply_text(
+        "Що публікувати в канал?\n\n"
+        "Спочатку переконайся що бот є адміном каналу і введи /setchannel @username",
+        reply_markup=kb
+    )
+
+async def setchannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if context.args:
+        channel = context.args[0]
+        json.dump({"channel": channel}, open("channel_tg.json", "w"), ensure_ascii=False)
+        await update.message.reply_text(f"Канал збережено: {channel}")
+    else:
+        await update.message.reply_text("Введи: /setchannel @username_каналу")
+
+async def chpost_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    if q.from_user.id != ADMIN_ID:
+        return
+    action = q.data.split("|")[1]
+    channel_file = "channel_tg.json"
+    if not os.path.exists(channel_file):
+        await q.edit_message_text("Спочатку встанови канал: /setchannel @username")
+        return
+    channel = json.load(open(channel_file)).get("channel")
+    if action == "fact":
+        text = ask_ai(ADMIN_ID, "Напиши один цікавий факт українською. Коротко і захоплююче.")
+        await context.bot.send_message(chat_id=channel, text=f"Факт дня:\n\n{text}")
+        await q.edit_message_text("Факт опубліковано!")
+    elif action == "tip":
+        text = ask_ai(ADMIN_ID, "Напиши одну корисну пораду про гроші або продуктивність українською.")
+        await context.bot.send_message(chat_id=channel, text=f"Порада дня:\n\n{text}")
+        await q.edit_message_text("Пораду опубліковано!")
+    elif action == "motivate":
+        text = random.choice(MOTIVATIONS)
+        await context.bot.send_message(chat_id=channel, text=text)
+        await q.edit_message_text("Мотивацію опубліковано!")
+    elif action == "custom":
+        user_state[q.from_user.id] = f"chpost_custom_{channel}"
+        await q.edit_message_text("Напиши текст для публікації в канал:")
+
+async def qr_read_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "qr_read"
+    await update.message.reply_text("Надішли фото з QR-кодом або штрих-кодом — я прочитаю що там:")
+
+async def announce_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Немає доступу.")
+        return
+    if context.args:
+        feature = " ".join(context.args)
+        await _post_to_channel(context, feature)
+        await update.message.reply_text("Опубліковано в канал!")
+    else:
+        user_state[update.effective_user.id] = "announce"
+        await update.message.reply_text("Що нового додали? Напиши коротко:")
+
+async def _post_to_channel(context, feature: str):
+    text = ask_ai(ADMIN_ID,
+        f"Напиши короткий пост для Telegram каналу про нову функцію бота Mark AI. "
+        f"Функція: {feature}. Чіпляючий заголовок, 2-3 речення, заклик спробувати. "
+        f"Додай емодзі. Без зірочок. В кінці: @MARK_AI_STEPANIUK"
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=CHANNEL_ID,
+            text=text,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("Спробувати", url="https://t.me/mark_stepaniuk_bot")
+            ]])
+        )
+    except Exception as e:
+        logging.error(f"Channel post error: {e}")
+
+async def channel_post_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Налаштування автопостингу в канал"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Немає доступу.")
+        return
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Встановити канал", callback_data="channel|set")],
+        [InlineKeyboardButton("Тест публікації", callback_data="channel|test")],
+        [InlineKeyboardButton("Вимкнути автопост", callback_data="channel|off")],
+    ])
+    settings = {}
+    if os.path.exists("channel_settings.json"):
+        try:
+            settings = json.load(open("channel_settings.json", encoding="utf-8"))
+        except:
+            pass
+    channel = settings.get("channel_id", "не встановлено")
+    auto = "увімкнено" if settings.get("auto_enabled") else "вимкнено"
+    await update.message.reply_text(
+        f"Автопостинг в канал:\n\nКанал: {channel}\nАвтопост: {auto}\n\n"
+        f"Щодня о 9:00 бот публікує 'факт дня' або 'пораду дня'.",
+        reply_markup=kb
+    )
+
+async def channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    if q.from_user.id != ADMIN_ID:
+        return
+    action = q.data.split("|")[1]
+    settings = {}
+    if os.path.exists("channel_settings.json"):
+        try:
+            settings = json.load(open("channel_settings.json", encoding="utf-8"))
+        except:
+            pass
+    if action == "set":
+        user_state[q.from_user.id] = "channel_set"
+        await q.edit_message_text(
+            "Напиши username каналу або перешли будь-яке повідомлення з каналу.\n"
+            "Наприклад: @mychannel\n\n"
+            "Бот має бути адміном каналу!"
+        )
+    elif action == "test":
+        channel_id = settings.get("channel_id")
+        if not channel_id:
+            await q.edit_message_text("Спочатку встанови канал.")
+            return
+        try:
+            fact = random.choice(FACTS)
+            await context.bot.send_message(chat_id=channel_id, text=f"Факт дня:\n\n{fact}")
+            await q.edit_message_text("Тестова публікація надіслана!")
+        except Exception as e:
+            await q.edit_message_text(f"Помилка: {e}\nПереконайся що бот є адміном каналу.")
+    elif action == "off":
+        settings["auto_enabled"] = False
+        json.dump(settings, open("channel_settings.json", "w", encoding="utf-8"), ensure_ascii=False)
+        await q.edit_message_text("Автопостинг вимкнено.")
+
 async def teach_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if context.args:
@@ -3401,6 +3573,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await leaderboard_cmd(update, context)
         return
 
+    if text == "🎯 Заголовки":
+        await viral_title_cmd(update, context)
+        return
+
+    if text == "🎯 Коуч":
+        await coach_cmd(update, context)
+        return
+
     if text == "📓 Щоденник":
         await diary_cmd(update, context)
         return
@@ -3513,8 +3693,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 prefix = f"[{i+1}/{len(parts)}]\n\n" if len(parts) > 1 else ""
                 await update.message.reply_text(f"🔗 Аналіз:\n\n{prefix}{part}")
         return
-    if state == "youtube":
-        await _summarize_youtube(update, uid, text, context)
+    if state == "viral_title":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Згенеруй 5 вірусних заголовків для TikTok/YouTube на тему '{text}'. "
+            f"Кожен з нового рядка, без нумерації, чіпляючі і інтригуючі."
+        )
+        await update.message.reply_text(f"Вірусні заголовки:\n\n{result}")
+        return
+    if state == "coach":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        step = context.user_data.get("coach_step", 0)
+        context.user_data["coach_goal"] = context.user_data.get("coach_goal", text if step == 0 else context.user_data.get("coach_goal", ""))
+        goal = context.user_data.get("coach_goal", text)
+        user_state[uid] = "coach"
+        context.user_data["coach_step"] = step + 1
+        coach_prompts = [
+            f"Ціль: '{goal}'. Запитай що заважає досягти цієї цілі. Тільки одне питання.",
+            f"Ціль: '{goal}'. Відповідь: '{text}'. Запитай що вже пробував робити. Тільки одне питання.",
+            f"Ціль: '{goal}'. На основі відповідей дай конкретний план дій на 7 днів. Структуровано.",
+        ]
+        if step < len(coach_prompts):
+            result = ask_ai(uid, coach_prompts[step])
+            await update.message.reply_text(result)
+        else:
+            user_state.pop(uid, None)
+            await update.message.reply_text("Сесія коучингу завершена. Дій за планом!")
+        return
+    if state and state.startswith("chpost_custom_"):
+        channel = state[14:]
+        try:
+            await context.bot.send_message(chat_id=channel, text=text)
+            await update.message.reply_text("Опубліковано в канал!")
+        except Exception as e:
+            await update.message.reply_text(f"Помилка: {e}")
         return
     if state == "download_video":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_video")
@@ -3550,6 +3762,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = split_long_message(result)
         for i, part in enumerate(parts):
             await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}" if len(parts) > 1 else part)
+        return
+    if state == "viral_title":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Згенеруй 5 вірусних заголовків для TikTok/Reels на тему '{text}'. "
+            f"Кожен короткий (до 10 слів), чіпляючий. Тільки список."
+        )
+        await update.message.reply_text(f"Заголовки для '{text}':\n\n{result}")
+        return
+    if state == "channel_set":
+        settings = {}
+        if os.path.exists("channel_settings.json"):
+            try:
+                settings = json.load(open("channel_settings.json", encoding="utf-8"))
+            except:
+                pass
+        channel_id = text.strip()
+        settings["channel_id"] = channel_id
+        settings["auto_enabled"] = True
+        json.dump(settings, open("channel_settings.json", "w", encoding="utf-8"), ensure_ascii=False)
+        await update.message.reply_text(f"Канал {channel_id} встановлено. Автопостинг увімкнено щодня о 9:00.")
+        return
+    if state == "announce":
+        await _post_to_channel(context, text)
+        await update.message.reply_text("Опубліковано в канал!")
         return
     if state == "ad_text":
         # Надсилаємо рекламу всім
@@ -4422,6 +4659,9 @@ if __name__ == "__main__":
         ("youtube", youtube_cmd), ("calories", calories_cmd), ("calories_today", calories_today_cmd),
         ("tiktok", tiktok_post_cmd), ("mbti", mbti_cmd), ("persona", persona_cmd),
         ("teach", teach_cmd), ("ad", ad_cmd), ("rstats", realtime_stats_cmd),
+        ("viral", viral_title_cmd), ("channel", channel_post_cmd), ("announce", announce_cmd),
+        ("viral", viral_title_cmd), ("coach", coach_cmd),
+        ("channel_post", channel_post_cmd), ("setchannel", setchannel_cmd),
     ]
     for cmd, handler in commands:
         app.add_handler(CommandHandler(cmd, handler))
@@ -4451,6 +4691,7 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(mbti_callback,         pattern="^mbti\\|"))
     app.add_handler(CallbackQueryHandler(persona_callback,      pattern="^persona\\|"))
     app.add_handler(CallbackQueryHandler(ad_callback,           pattern="^ad\\|"))
+    app.add_handler(CallbackQueryHandler(channel_callback,      pattern="^channel\\|"))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
@@ -4471,6 +4712,46 @@ if __name__ == "__main__":
         )
     except:
         pass
+
+    # Автоматична публікація в канал при кожному деплої
+    async def post_update_to_channel():
+        await asyncio.sleep(5)  # чекаємо поки бот запуститься
+        try:
+            version_file = "last_version.txt"
+            # Читаємо поточну версію (кількість рядків коду як версія)
+            try:
+                with open(__file__, encoding='utf-8') as f:
+                    current_lines = len(f.readlines())
+            except:
+                current_lines = 0
+            last_lines = 0
+            if os.path.exists(version_file):
+                try:
+                    last_lines = int(open(version_file).read().strip())
+                except:
+                    pass
+            # Якщо код змінився більш ніж на 10 рядків — публікуємо
+            if abs(current_lines - last_lines) > 10 and last_lines > 0:
+                # Генеруємо пост про оновлення
+                diff = current_lines - last_lines
+                action = "додано нові функції" if diff > 0 else "покращено роботу"
+                post_text = ask_ai(ADMIN_ID,
+                    f"Напиши короткий пост для Telegram каналу про оновлення бота Mark AI. "
+                    f"Бот отримав оновлення — {action}. "
+                    f"Зроби цікавий пост з емодзі, без зірочок, 2-3 речення. "
+                    f"В кінці додай: Спробуй @mark_stepaniuk_bot"
+                )
+                await app.bot.send_message(
+                    chat_id=CHANNEL_ID,
+                    text=post_text,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Спробувати", url="https://t.me/mark_stepaniuk_bot")
+                    ]])
+                )
+            # Зберігаємо поточну версію
+            open(version_file, 'w').write(str(current_lines))
+        except Exception as e:
+            logging.error(f"Auto-announce error: {e}")
 
     # Фонова задача щоденного дайджесту
     async def daily_digest_task():
@@ -4504,7 +4785,28 @@ if __name__ == "__main__":
                             pass
             except:
                 pass
-            # Авторозсилка реклами о 12:00
+            # Автопостинг в канал о 9:00
+            try:
+                if now.hour == 9 and now.minute == 0:
+                    ch_file = "channel_settings.json"
+                    if os.path.exists(ch_file):
+                        ch_settings = json.load(open(ch_file, encoding="utf-8"))
+                        if ch_settings.get("auto_enabled") and ch_settings.get("channel_id"):
+                            last_ch = ch_settings.get("last_post", "")
+                            if last_ch != today:
+                                channel_id = ch_settings["channel_id"]
+                                # Генеруємо контент
+                                post_types = ["факт", "порада", "мотивація", "цікавинка"]
+                                post_type = random.choice(post_types)
+                                content = ask_ai(ADMIN_ID,
+                                    f"Напиши цікавий {post_type} дня для Telegram каналу. "
+                                    f"Коротко, цікаво, без зірочок. Додай емодзі."
+                                )
+                                await app.bot.send_message(chat_id=channel_id, text=content)
+                                ch_settings["last_post"] = today
+                                json.dump(ch_settings, open(ch_file, "w", encoding="utf-8"), ensure_ascii=False)
+            except:
+                pass
             try:
                 if now.hour == 12 and now.minute == 0:
                     ad_file = "ad_auto.json"
@@ -4525,5 +4827,6 @@ if __name__ == "__main__":
             await asyncio.sleep(60)
 
     asyncio.get_event_loop().create_task(daily_digest_task())
+    asyncio.get_event_loop().create_task(post_update_to_channel())
 
     app.run_polling(drop_pending_updates=True)
