@@ -150,7 +150,7 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["🧮 Калькулятор","📖 Вікіпедія","🌐 Переклад"],
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
     ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
-    ["🍽 Калорії",   "📊 Статистика","❓ Допомога"],
+    ["🍽 Калорії",   "📊 Статистика","❓ Допомога", "🆘 Підтримка"],
     ["💪 Мотивація", "💻 Код",  "🖼 Цитата", "🎭 Персонаж", "🔮 Особистість", "➡️ Ще функції"],], resize_keyboard=True)
 
 PAGE2_KB = ReplyKeyboardMarkup([
@@ -2262,6 +2262,15 @@ async def personality_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Визначу: характер, настрій, енергетику, сильні сторони."
     )
 
+async def support_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "support"
+    await update.message.reply_text(
+        "Служба підтримки Mark AI\n\n"
+        "Опиши свою проблему — я передам її адміністратору.\n"
+        "Зазвичай відповідаємо протягом кількох годин."
+    )
+
 async def announce_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Немає доступу.")
@@ -3396,6 +3405,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "❓ Допомога":   help_cmd,
         "💪 Мотивація":  motivate_cmd,
         "📊 Статистика": stats_cmd,
+        "🆘 Підтримка":  support_cmd,
     }
     if text in simple:
         await simple[text](update, context)
@@ -3799,6 +3809,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "announce":
         await _post_to_channel(context, text)
         await update.message.reply_text("Опубліковано в канал!")
+        return
+    if state == "support":
+        u = update.effective_user
+        uname = f"@{u.username}" if u.username else "без username"
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"Звернення в підтримку:\n\n"
+                     f"Від: {u.first_name} ({uname})\n"
+                     f"ID: {uid}\n\n"
+                     f"Проблема: {text}",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("Відповісти", url=f"tg://user?id={uid}")
+                ]])
+            )
+        except:
+            pass
+        await update.message.reply_text(
+            "Твоє звернення надіслано адміністратору. Очікуй відповіді!"
+        )
         return
     if state == "ad_text":
         # Надсилаємо рекламу всім
@@ -4686,7 +4716,7 @@ if __name__ == "__main__":
         ("tiktok", tiktok_post_cmd), ("mbti", mbti_cmd), ("persona", persona_cmd),
         ("teach", teach_cmd), ("ad", ad_cmd), ("rstats", realtime_stats_cmd),
         ("viral", viral_title_cmd), ("channel", channel_post_cmd), ("announce", announce_cmd),
-        ("personality", personality_cmd),
+        ("personality", personality_cmd), ("support", support_cmd),
         ("viral", viral_title_cmd), ("coach", coach_cmd),
         ("channel_post", channel_post_cmd), ("setchannel", setchannel_cmd),
     ]
