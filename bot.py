@@ -4742,41 +4742,20 @@ if __name__ == "__main__":
 
     # Автоматична публікація в канал при кожному деплої
     async def post_update_to_channel():
-        await asyncio.sleep(5)  # чекаємо поки бот запуститься
+        await asyncio.sleep(8)
         try:
-            version_file = "last_version.txt"
-            # Читаємо поточну версію (кількість рядків коду як версія)
-            try:
-                with open(__file__, encoding='utf-8') as f:
-                    current_lines = len(f.readlines())
-            except:
-                current_lines = 0
-            last_lines = 0
-            if os.path.exists(version_file):
-                try:
-                    last_lines = int(open(version_file).read().strip())
-                except:
-                    pass
-            # Якщо код змінився більш ніж на 10 рядків — публікуємо
-            if abs(current_lines - last_lines) > 10 and last_lines > 0:
-                # Генеруємо пост про оновлення
-                diff = current_lines - last_lines
-                action = "додано нові функції" if diff > 0 else "покращено роботу"
-                post_text = ask_ai(ADMIN_ID,
-                    f"Напиши короткий пост для Telegram каналу про оновлення бота Mark AI. "
-                    f"Бот отримав оновлення — {action}. "
-                    f"Зроби цікавий пост з емодзі, без зірочок, 2-3 речення. "
-                    f"В кінці додай: Спробуй @mark_stepaniuk_bot"
-                )
-                await app.bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=post_text,
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("Спробувати", url="https://t.me/mark_stepaniuk_bot")
-                    ]])
-                )
-            # Зберігаємо поточну версію
-            open(version_file, 'w').write(str(current_lines))
+            post_text = ask_ai(ADMIN_ID,
+                "Напиши короткий пост для Telegram каналу про те що бот Mark AI отримав нові функції та покращення. "
+                "Зроби цікавий пост з емодзі, без зірочок, 2-3 речення. "
+                "В кінці: Спробуй @mark_stepaniuk_bot"
+            )
+            await app.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=post_text,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("Спробувати", url="https://t.me/mark_stepaniuk_bot")
+                ]])
+            )
         except Exception as e:
             logging.error(f"Auto-announce error: {e}")
 
