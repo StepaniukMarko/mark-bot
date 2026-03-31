@@ -2285,7 +2285,7 @@ async def _post_to_channel(context, feature: str):
             chat_id=CHANNEL_ID,
             text=text,
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Спробувати", url="https://t.me/mark_stepaniuk_bot")
+                InlineKeyboardButton("Спробувати", url="https://t.me/mark_ai_stepaniuk_bot")
             ]])
         )
     except Exception as e:
@@ -4747,13 +4747,13 @@ if __name__ == "__main__":
             post_text = ask_ai(ADMIN_ID,
                 "Напиши короткий пост для Telegram каналу про те що бот Mark AI отримав нові функції та покращення. "
                 "Зроби цікавий пост з емодзі, без зірочок, 2-3 речення. "
-                "В кінці: Спробуй @mark_stepaniuk_bot"
+                "В кінці: Спробуй @mark_ai_stepaniuk_bot"
             )
             await app.bot.send_message(
                 chat_id=CHANNEL_ID,
                 text=post_text,
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("Спробувати", url="https://t.me/mark_stepaniuk_bot")
+                    InlineKeyboardButton("Спробувати", url="https://t.me/mark_ai_stepaniuk_bot")
                 ]])
             )
         except Exception as e:
