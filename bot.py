@@ -151,7 +151,7 @@ MAIN_KB = ReplyKeyboardMarkup([
     ["🎲 Ігри",      "📷 QR-код",    "₿ Крипта"],
     ["🎨 Генерація", "🎵 Музика",    "⭐ Преміум"],
     ["🍽 Калорії",   "📊 Статистика","❓ Допомога"],
-    ["💪 Мотивація", "💻 Код",  "🖼 Цитата",  "🎭 Персонаж", "➡️ Ще функції"],], resize_keyboard=True)
+    ["💪 Мотивація", "💻 Код",  "🖼 Цитата", "🎭 Персонаж", "🔮 Особистість", "➡️ Ще функції"],], resize_keyboard=True)
 
 PAGE2_KB = ReplyKeyboardMarkup([
     ["⭐ Купити Преміум", "👥 Реферали"],
@@ -2254,6 +2254,14 @@ async def qr_read_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state[uid] = "qr_read"
     await update.message.reply_text("Надішли фото з QR-кодом або штрих-кодом — я прочитаю що там:")
 
+async def personality_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "personality_photo"
+    await update.message.reply_text(
+        "Надішли своє фото — я проаналізую особистість по обличчю!\n\n"
+        "Визначу: характер, настрій, енергетику, сильні сторони."
+    )
+
 async def announce_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Немає доступу.")
@@ -3614,6 +3622,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await persona_cmd(update, context)
         return
 
+    if text == "🔮 Особистість":
+        await personality_cmd(update, context)
+        return
+
     if text == "📚 Вчитель":
         await teach_cmd(update, context)
         return
@@ -4508,6 +4520,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_photo(photo=buf)
         return
 
+    # Аналіз особистості по фото
+    if user_state.get(uid) == "personality_photo":
+        user_state.pop(uid, None)
+        result = analyze_image(image_url,
+            "Analyze this person's face and personality. Describe in Ukrainian:\n"
+            "1. Character traits (2-3 main traits)\n"
+            "2. Current mood/energy\n"
+            "3. Strengths\n"
+            "4. What kind of person they seem to be\n"
+            "Be positive, insightful and specific. No Markdown."
+        )
+        await update.message.reply_text(f"Аналіз особистості:\n\n{result}")
+        return
+
     # Їжа
     is_food = user_state.get(uid) == "food_photo" or any(
         w in caption_lower for w in ["їжа", "страва", "калорії", "food", "calories", "рецепт"]
@@ -4660,6 +4686,7 @@ if __name__ == "__main__":
         ("tiktok", tiktok_post_cmd), ("mbti", mbti_cmd), ("persona", persona_cmd),
         ("teach", teach_cmd), ("ad", ad_cmd), ("rstats", realtime_stats_cmd),
         ("viral", viral_title_cmd), ("channel", channel_post_cmd), ("announce", announce_cmd),
+        ("personality", personality_cmd),
         ("viral", viral_title_cmd), ("coach", coach_cmd),
         ("channel_post", channel_post_cmd), ("setchannel", setchannel_cmd),
     ]
