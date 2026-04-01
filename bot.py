@@ -4995,6 +4995,142 @@ async def subtitle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await context.bot.send_message(chat_id=uid, text=f"Помилка: {e}")
 
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Накладає субтитри на відео через Whisper + ffmpeg"""
+    uid = update.effective_user.id
+    caption = (update.message.caption or "").lower()
+    subtitle_triggers = ["субтитри", "розпізнай", "що говорять", "перепиши", "subtitles"]
+    wants_subtitles = any(t in caption for t in subtitle_triggers) or user_state.get(uid) == "subtitle_video"
+
+    if not wants_subtitles:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Додати субтитри на відео", callback_data="subtitle|yes")]])
+        context.user_data["pending_video"] = update.message.video.file_id
+        await update.message.reply_text("Хочеш щоб я додав субтитри прямо на відео?", reply_markup=kb)
+        return
+
+    user_state.pop(uid, None)
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_video")
+    await update.message.reply_text("Розпізнаю мову і накладаю субтитри... (~30-60 сек)")
+
+    video = update.message.video
+    if video.file_size and video.file_size > 20 * 1024 * 1024:
+        await update.message.reply_text("Відео занадто велике (макс 20MB).")
+        return
+
+    try:
+        import tempfile, subprocess, os as _os
+        file = await context.bot.get_file(video.file_id)
+        video_bytes = await file.download_as_bytearray()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = _os.path.join(tmpdir, "input.mp4")
+            srt_path = _os.path.join(tmpdir, "subs.srt")
+            output_path = _os.path.join(tmpdir, "output.mp4")
+
+            with open(video_path, "wb") as f:
+                f.write(bytes(video_bytes))
+
+            # Розпізнаємо через Whisper
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+            wfiles = {
+                "file": ("video.mp4", bytes(video_bytes), "video/mp4"),
+                "model": (None, "whisper-large-v3"),
+                "response_format": (None, "verbose_json"),
+            }
+            r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
+                              headers=headers, files=wfiles, timeout=60)
+            r.raise_for_status()
+            segments = r.json().get("segments", [])
+
+            if not segments:
+                await update.message.reply_text("Не вдалося розпізнати мову у відео.")
+                return
+
+            # Генеруємо SRT
+            def to_srt_time(s):
+                h, rem = divmod(s, 3600)
+                m, sec = divmod(rem, 60)
+                ms = int((s - int(s)) * 1000)
+                return f"{int(h):02d}:{int(m):02d}:{int(sec):02d},{ms:03d}"
+
+            srt = ""
+            for i, seg in enumerate(segments, 1):
+                srt += f"{i}\n{to_srt_time(seg['start'])} --> {to_srt_time(seg['end'])}\n{seg['text'].strip()}\n\n"
+
+            with open(srt_path, "w", encoding="utf-8") as f:
+                f.write(srt)
+
+            # Накладаємо через ffmpeg
+            cmd = ["ffmpeg", "-i", video_path,
+                   "-vf", f"subtitles={srt_path}:force_style='FontSize=16,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Bold=1,Alignment=2'",
+                   "-c:a", "copy", "-y", output_path]
+            result = subprocess.run(cmd, capture_output=True, timeout=120)
+
+            if result.returncode == 0 and _os.path.exists(output_path):
+                with open(output_path, "rb") as f:
+                    await update.message.reply_video(video=f, caption="Відео з субтитрами")
+            else:
+                # ffmpeg не спрацював — надсилаємо текст
+                lines = [f"[{int(seg['start']//60):02d}:{int(seg['start']%60):02d}] {seg['text'].strip()}" for seg in segments]
+                await update.message.reply_text("Субтитри (текст):\n\n" + "\n".join(lines))
+    except Exception as e:
+        await update.message.reply_text(f"Помилка: {e}")
+
+async def subtitle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    if q.data == "subtitle|yes":
+        file_id = context.user_data.get("pending_video")
+        if not file_id:
+            await q.edit_message_text("Відео не знайдено. Надішли ще раз.")
+            return
+        user_state[uid] = "subtitle_video"
+        await q.edit_message_text("Розпізнаю і накладаю субтитри...")
+        try:
+            import tempfile, subprocess, os as _os
+            file = await context.bot.get_file(file_id)
+            video_bytes = await file.download_as_bytearray()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                video_path = _os.path.join(tmpdir, "input.mp4")
+                srt_path = _os.path.join(tmpdir, "subs.srt")
+                output_path = _os.path.join(tmpdir, "output.mp4")
+                with open(video_path, "wb") as f:
+                    f.write(bytes(video_bytes))
+                headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+                wfiles = {"file": ("video.mp4", bytes(video_bytes), "video/mp4"),
+                          "model": (None, "whisper-large-v3"), "response_format": (None, "verbose_json")}
+                r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
+                                  headers=headers, files=wfiles, timeout=60)
+                r.raise_for_status()
+                segments = r.json().get("segments", [])
+                if not segments:
+                    await context.bot.send_message(chat_id=uid, text="Не вдалося розпізнати мову.")
+                    return
+                def to_srt_time(s):
+                    h, rem = divmod(s, 3600)
+                    m, sec = divmod(rem, 60)
+                    ms = int((s - int(s)) * 1000)
+                    return f"{int(h):02d}:{int(m):02d}:{int(sec):02d},{ms:03d}"
+                srt = ""
+                for i, seg in enumerate(segments, 1):
+                    srt += f"{i}\n{to_srt_time(seg['start'])} --> {to_srt_time(seg['end'])}\n{seg['text'].strip()}\n\n"
+                with open(srt_path, "w", encoding="utf-8") as f:
+                    f.write(srt)
+                cmd = ["ffmpeg", "-i", video_path,
+                       "-vf", f"subtitles={srt_path}:force_style='FontSize=16,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Bold=1,Alignment=2'",
+                       "-c:a", "copy", "-y", output_path]
+                result = subprocess.run(cmd, capture_output=True, timeout=120)
+                if result.returncode == 0:
+                    with open(output_path, "rb") as f:
+                        await context.bot.send_video(chat_id=uid, video=f, caption="Відео з субтитрами")
+                else:
+                    lines = [f"[{int(seg['start']//60):02d}:{int(seg['start']%60):02d}] {seg['text'].strip()}" for seg in segments]
+                    await context.bot.send_message(chat_id=uid, text="Субтитри:\n\n" + "\n".join(lines))
+        except Exception as e:
+            await context.bot.send_message(chat_id=uid, text=f"Помилка: {e}")
+        user_state.pop(uid, None)
+
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Розпізнає голосове повідомлення через Groq Whisper"""
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -5134,7 +5270,9 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(CallbackQueryHandler(subtitle_callback, pattern="^subtitle\\|"))
     app.add_error_handler(error_handler)
 
     print("🤖 Марк запущено! Ctrl+C щоб зупинити.")
