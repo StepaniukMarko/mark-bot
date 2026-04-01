@@ -5061,7 +5061,12 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f.write(srt)
 
             # Накладаємо через ffmpeg
-            cmd = ["ffmpeg", "-i", video_path,
+            try:
+                import imageio_ffmpeg
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            except:
+                ffmpeg_exe = "ffmpeg"
+            cmd = [ffmpeg_exe, "-i", video_path,
                    "-vf", f"subtitles={srt_path}:force_style='FontSize=16,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Bold=1,Alignment=2'",
                    "-c:a", "copy", "-y", output_path]
             result = subprocess.run(cmd, capture_output=True, timeout=120)
@@ -5117,7 +5122,12 @@ async def subtitle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     srt += f"{i}\n{to_srt_time(seg['start'])} --> {to_srt_time(seg['end'])}\n{seg['text'].strip()}\n\n"
                 with open(srt_path, "w", encoding="utf-8") as f:
                     f.write(srt)
-                cmd = ["ffmpeg", "-i", video_path,
+                try:
+                    import imageio_ffmpeg
+                    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                except:
+                    ffmpeg_exe = "ffmpeg"
+                cmd = [ffmpeg_exe, "-i", video_path,
                        "-vf", f"subtitles={srt_path}:force_style='FontSize=16,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Bold=1,Alignment=2'",
                        "-c:a", "copy", "-y", output_path]
                 result = subprocess.run(cmd, capture_output=True, timeout=120)
