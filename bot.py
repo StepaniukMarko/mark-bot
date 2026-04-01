@@ -239,7 +239,6 @@ def ask_ai(user_id: int, message: str) -> str:
         "Відповідай ВИКЛЮЧНО українською мовою",
         lang_instruction
     )
-    # Додаємо пам'ять про користувача
     mem_text = memory_to_text(load_memory(user_id))
     if mem_text:
         system += f"\n\nЩо ти знаєш про цього користувача:\n{mem_text}\nВикористовуй цю інформацію щоб відповіді були персоналізованими."
@@ -250,18 +249,28 @@ def ask_ai(user_id: int, message: str) -> str:
         "temperature": 0.8,
         "max_tokens": 8000,
     }
-    try:
-        r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=20)
-        r.raise_for_status()
-        reply = r.json()["choices"][0]["message"]["content"]
-        history.append({"role": "assistant", "content": reply})
-        if len(history) > 40:
-            user_histories[user_id] = history[-40:]
-        # Витягуємо факти з розмови у фоні
-        extract_and_update_memory(user_id, message, reply)
-        return clean_ai_text(reply)
-    except Exception as e:
-        return f"😴 AI тимчасово недоступний. Спробуй ще раз! ({e})"
+    # Retry при 429 (rate limit)
+    for attempt in range(3):
+        try:
+            r = requests.post(GROQ_URL, headers=headers, json=payload, timeout=20)
+            if r.status_code == 429:
+                import time
+                wait = 5 * (attempt + 1)
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            reply = r.json()["choices"][0]["message"]["content"]
+            history.append({"role": "assistant", "content": reply})
+            if len(history) > 40:
+                user_histories[user_id] = history[-40:]
+            extract_and_update_memory(user_id, message, reply)
+            return clean_ai_text(reply)
+        except Exception as e:
+            if attempt == 2:
+                return "Зараз забагато запитів. Зачекай 10 секунд і спробуй ще раз."
+            import time
+            time.sleep(3)
+    return "Зараз забагато запитів. Зачекай 10 секунд і спробуй ще раз."
 def split_long_message(text: str, limit: int = 4000) -> list[str]:
     """Розбиває довгий текст на частини не більше limit символів"""
     if len(text) <= limit:
@@ -5219,7 +5228,21 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Помилка розпізнавання: {e}")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logging.error(f"Помилка: {context.error}")
+    err = str(context.error)
+    logging.error(f"Помилка: {err}")
+    # Сповіщаємо адміна про критичні помилки (не 429)
+    if "429" not in err and "Conflict" not in err:
+        try:
+            user_info = ""
+            if update and hasattr(update, 'effective_user') and update.effective_user:
+                u = update.effective_user
+                user_info = f"\nЮзер: {u.first_name} (ID: {u.id})"
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"Помилка в боті:{user_info}\n{err[:500]}"
+            )
+        except:
+            pass
 
 # ══════════════════════════════════════
 #  ЗАПУСК
