@@ -5060,24 +5060,47 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(srt_path, "w", encoding="utf-8") as f:
                 f.write(srt)
 
-            # Накладаємо через ffmpeg
+            # Накладаємо через ffmpeg з підтримкою кирилиці
             try:
                 import imageio_ffmpeg
                 ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
             except:
                 ffmpeg_exe = "ffmpeg"
-            cmd = [ffmpeg_exe, "-i", video_path,
-                   "-vf", f"subtitles={srt_path}:force_style='FontSize=16,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,Bold=1,Alignment=2'",
-                   "-c:a", "copy", "-y", output_path]
+
+            # Шукаємо шрифт що підтримує кирилицю
+            font_paths = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+                "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+            ]
+            font_path = None
+            for fp in font_paths:
+                if _os.path.exists(fp):
+                    font_path = fp
+                    break
+
+            if font_path:
+                # Використовуємо subtitles з конкретним шрифтом
+                vf = f"subtitles={srt_path}:fontsdir={_os.path.dirname(font_path)}:force_style='FontName=DejaVu Sans Bold,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Bold=1,Alignment=2'"
+            else:
+                # Без шрифту — просто subtitles
+                vf = f"subtitles={srt_path}:force_style='FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Bold=1,Alignment=2'"
+
+            cmd = [ffmpeg_exe, "-i", video_path, "-vf", vf,
+                   "-c:a", "copy", "-preset", "fast", "-y", output_path]
             result = subprocess.run(cmd, capture_output=True, timeout=120)
 
             if result.returncode == 0 and _os.path.exists(output_path):
                 with open(output_path, "rb") as f:
                     await update.message.reply_video(video=f, caption="Відео з субтитрами")
             else:
-                # ffmpeg не спрацював — надсилаємо текст
-                lines = [f"[{int(seg['start']//60):02d}:{int(seg['start']%60):02d}] {seg['text'].strip()}" for seg in segments]
-                await update.message.reply_text("Субтитри (текст):\n\n" + "\n".join(lines))
+                # Надсилаємо відео + srt файл окремо
+                with open(video_path, "rb") as f:
+                    await update.message.reply_video(video=f, caption="Відео (субтитри окремим файлом)")
+                with open(srt_path, "rb") as f:
+                    await update.message.reply_document(document=f, filename="subtitles.srt",
+                                                         caption="Відкрий відео в VLC і підтягни цей файл субтитрів")
     except Exception as e:
         await update.message.reply_text(f"Помилка: {e}")
 
