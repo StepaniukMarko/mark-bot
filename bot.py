@@ -160,15 +160,24 @@ PAGE2_KB = ReplyKeyboardMarkup([
     ["🌐 Мова AI",       "📋 Шпаргалка",  "✍️ Граматика"],
     ["📱 Пост",          "💡 Бізнес-ідея","💰 Витрати"],
     ["🧠 Вікторина",     "💑 Сумісність", "😂 Мем"],
-    ["📅 Розклад",       "🏆 Лідерборд",  "🎯 Заголовки", "➡️ Сторінка 3", "⬅️ Назад"],], resize_keyboard=True)
+    ["📅 Розклад",       "🏆 Лідерборд",  "🎯 Заголовки", "📽 Сценарій", "➡️ Сторінка 3", "⬅️ Назад"],], resize_keyboard=True)
 
 PAGE3_KB = ReplyKeyboardMarkup([
     ["🍅 Помодоро",      "🎮 Нікнейм",    "🌐 Перевірка сайту"],
     ["📝 Резюме тексту", "🔄 Синоніми",   "🌍 Країна по IP"],
-    ["🧠 Моя пам'ять",   "🔬 Глибокий аналіз", "⬅️ Назад"],
-    ["🔗 Аналіз сайту",  "🎭 Дебати",  "🎬 Комікс",  "⬅️ Назад"],
-    ["📓 Щоденник",      "💪 Звички",           "📋 Резюме/CV"],
-    ["🌅 Дайджест",      "📺 YouTube",  "📥 Скачати відео", "⬅️ Назад"],
+    ["🧠 Моя пам'ять",   "🔬 Глибокий аналіз", "🎯 Заголовки"],
+    ["🔗 Аналіз сайту",  "🎭 Дебати",    "🎬 Комікс"],
+    ["📓 Щоденник",      "💪 Звички",    "📋 Резюме/CV"],
+    ["🌅 Дайджест",      "📺 YouTube",   "📥 Скачати відео"],
+    ["📽 Сценарій",      "🃏 Правда/Дія","🌙 Гороскоп тижня"],
+    ["🖼 Переклад фото", "✍️ Рукопис",   "🧬 MBTI тест"],
+    ["➡️ Сторінка 4",    "⬅️ Назад"],
+], resize_keyboard=True)
+
+PAGE4_KB = ReplyKeyboardMarkup([
+    ["🔮 Особистість",   "🎭 Персонаж",  "📚 Вчитель"],
+    ["💰 Калорії дня",   "📊 Ліміт фото","🏆 Лідерборд"],
+    ["⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -2262,6 +2271,155 @@ async def personality_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Визначу: характер, настрій, енергетику, сильні сторони."
     )
 
+async def script_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if context.args:
+        topic = " ".join(context.args)
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Напиши готовий сценарій для TikTok відео на тему '{topic}'. "
+            f"Структура: Хук (перші 3 секунди), Основна частина (15-20 сек), Заклик до дії. "
+            f"Вкажи що говорити і що показувати. Без зірочок."
+        )
+        parts = split_long_message(result)
+        for i, part in enumerate(parts):
+            await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}" if len(parts) > 1 else part)
+    else:
+        user_state[uid] = "script"
+        await update.message.reply_text(
+            "Сценарій для TikTok відео.\n\nНа яку тему? Наприклад: гроші, мотивація, лайфхак"
+        )
+
+async def truth_dare_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Правда", callback_data="td|truth"),
+         InlineKeyboardButton("Дія", callback_data="td|dare")],
+        [InlineKeyboardButton("Для компанії", callback_data="td|group")],
+    ])
+    await update.message.reply_text("Правда або Дія? Обери:", reply_markup=kb)
+
+async def td_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    action = q.data.split("|")[1]
+    if action == "truth":
+        result = ask_ai(uid, "Придумай одне цікаве питання для гри 'Правда або Дія'. Питання має бути особистим і трохи незручним але не образливим. Тільки питання.")
+        await q.edit_message_text(f"Правда:\n\n{result}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Ще", callback_data="td|truth")]]))
+    elif action == "dare":
+        result = ask_ai(uid, "Придумай одне смішне завдання для гри 'Правда або Дія'. Має бути весело і виконувано. Тільки завдання.")
+        await q.edit_message_text(f"Дія:\n\n{result}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Ще", callback_data="td|dare")]]))
+    elif action == "group":
+        result = ask_ai(uid, "Придумай 3 питання і 3 завдання для гри 'Правда або Дія' в компанії. Весело і не образливо.")
+        await q.edit_message_text(result)
+
+async def weekly_horoscope_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("♈ Овен", callback_data="whs|овен"), InlineKeyboardButton("♉ Телець", callback_data="whs|телець"), InlineKeyboardButton("♊ Близнюки", callback_data="whs|близнюки")],
+        [InlineKeyboardButton("♋ Рак", callback_data="whs|рак"), InlineKeyboardButton("♌ Лев", callback_data="whs|лев"), InlineKeyboardButton("♍ Діва", callback_data="whs|діва")],
+        [InlineKeyboardButton("♎ Терези", callback_data="whs|терези"), InlineKeyboardButton("♏ Скорпіон", callback_data="whs|скорпіон"), InlineKeyboardButton("♐ Стрілець", callback_data="whs|стрілець")],
+        [InlineKeyboardButton("♑ Козеріг", callback_data="whs|козеріг"), InlineKeyboardButton("♒ Водолій", callback_data="whs|водолій"), InlineKeyboardButton("♓ Риби", callback_data="whs|риби")],
+    ])
+    await update.message.reply_text("Обери знак для прогнозу на тиждень:", reply_markup=kb)
+
+async def whs_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    sign = q.data.split("|")[1]
+    uid = q.from_user.id
+    await q.edit_message_text("Складаю прогноз...")
+    result = ask_ai(uid,
+        f"Напиши детальний астрологічний прогноз на тиждень для знаку {sign}. "
+        f"Включи: загальний настрій тижня, любов і стосунки, робота і гроші, здоров'я, "
+        f"щасливі дні, поради. Без зірочок, з емодзі."
+    )
+    parts = split_long_message(result)
+    await q.edit_message_text(f"Прогноз на тиждень для {sign}:\n\n{parts[0]}")
+    for part in parts[1:]:
+        await context.bot.send_message(chat_id=q.from_user.id, text=part)
+
+async def img_limit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує скільки генерацій залишилось"""
+    uid = update.effective_user.id
+    if is_premium(uid) or uid == ADMIN_ID:
+        await update.message.reply_text("Преміум: необмежена генерація зображень.")
+        return
+    today = datetime.now().strftime("%Y-%m-%d")
+    img_file = f"img_count_{uid}.json"
+    count = 0
+    if os.path.exists(img_file):
+        try:
+            data = json.load(open(img_file, encoding='utf-8'))
+            if data.get("date") == today:
+                count = data.get("count", 0)
+        except:
+            pass
+    remaining = max(0, 3 - count)
+    await update.message.reply_text(
+        f"Генерацій зображень сьогодні: {count}/3\n"
+        f"Залишилось: {remaining}\n\n"
+        f"Преміум — необмежено: /premium"
+    )
+
+def check_img_limit(user_id: int) -> bool:
+    """Перевіряє ліміт генерації зображень (3/день безкоштовно)"""
+    if is_premium(user_id) or user_id == ADMIN_ID:
+        return True
+    today = datetime.now().strftime("%Y-%m-%d")
+    img_file = f"img_count_{user_id}.json"
+    count = 0
+    if os.path.exists(img_file):
+        try:
+            data = json.load(open(img_file, encoding='utf-8'))
+            if data.get("date") == today:
+                count = data.get("count", 0)
+        except:
+            pass
+    return count < 3
+
+def increment_img_count(user_id: int):
+    if is_premium(user_id) or user_id == ADMIN_ID:
+        return
+    today = datetime.now().strftime("%Y-%m-%d")
+    img_file = f"img_count_{user_id}.json"
+    count = 0
+    if os.path.exists(img_file):
+        try:
+            data = json.load(open(img_file, encoding='utf-8'))
+            if data.get("date") == today:
+                count = data.get("count", 0)
+        except:
+            pass
+    json.dump({"date": today, "count": count + 1}, open(img_file, 'w', encoding='utf-8'))
+
+async def translate_photo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Українська", callback_data="tph|українська"),
+         InlineKeyboardButton("Англійська", callback_data="tph|англійська")],
+        [InlineKeyboardButton("Польська", callback_data="tph|польська"),
+         InlineKeyboardButton("Німецька", callback_data="tph|німецька")],
+    ])
+    await update.message.reply_text("На яку мову перекласти текст з фото?", reply_markup=kb)
+
+async def tph_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    lang = q.data.split("|")[1]
+    context.user_data["translate_photo_lang"] = lang
+    user_state[uid] = "translate_photo"
+    await q.edit_message_text(f"Надішли фото з текстом — переведу на {lang}:")
+
+async def handwriting_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "handwriting"
+    await update.message.reply_text(
+        "Надішли фото з рукописним текстом — я розпізнаю і перепишу його:"
+    )
+
 async def support_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user_state[uid] = "support"
@@ -2856,10 +3014,24 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     payload = update.message.successful_payment.invoice_payload
     days = int(payload.split("_")[1])
     grant_premium(uid, days)
+    amount = update.message.successful_payment.total_amount
+    u = update.effective_user
+    uname = f"@{u.username}" if u.username else "без username"
     await update.message.reply_text(
-        f"✅ Оплата успішна! Преміум на {days} днів активовано!\n\n"
-        f"Дякуємо за підтримку ⭐",
+        f"✅ Оплата успішна! Преміум на {days} днів активовано!\n\nДякуємо за підтримку ⭐"
     )
+    # Сповіщення адміну про покупку
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"💰 Нова покупка преміум!\n\n"
+                 f"Юзер: {u.first_name} ({uname})\n"
+                 f"ID: {uid}\n"
+                 f"Преміум: {days} днів\n"
+                 f"Сума: {amount} Stars"
+        )
+    except:
+        pass
 
 async def ref_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -3469,6 +3641,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "➡️ Сторінка 3":
         await update.message.reply_text("Сторінка 3:", reply_markup=PAGE3_KB)
         return
+
+    if text == "➡️ Сторінка 4":
+        await update.message.reply_text("Сторінка 4:", reply_markup=PAGE4_KB)
+        return
     if text == "🍅 Помодоро":
         await pomodoro_cmd(update, context)
         return
@@ -3593,6 +3769,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "🎯 Заголовки":
         await viral_title_cmd(update, context)
+        return
+
+    if text == "📽 Сценарій":
+        await script_cmd(update, context)
+        return
+
+    if text == "🃏 Правда/Дія":
+        await truth_dare_cmd(update, context)
+        return
+
+    if text == "🌙 Гороскоп тижня":
+        await weekly_horoscope_cmd(update, context)
+        return
+
+    if text == "🖼 Переклад фото":
+        await translate_photo_cmd(update, context)
+        return
+
+    if text == "✍️ Рукопис":
+        await handwriting_cmd(update, context)
+        return
+
+    if text == "🧬 MBTI тест":
+        await mbti_cmd(update, context)
+        return
+
+    if text == "📚 Вчитель":
+        await teach_cmd(update, context)
+        return
+
+    if text == "💰 Калорії дня":
+        await calories_today_cmd(update, context)
+        return
+
+    if text == "📊 Ліміт фото":
+        await img_limit_cmd(update, context)
         return
 
     if text == "🎯 Коуч":
@@ -3792,6 +4004,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Кожен короткий (до 10 слів), чіпляючий. Тільки список."
         )
         await update.message.reply_text(f"Заголовки для '{text}':\n\n{result}")
+        return
+    if state == "script":
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        result = ask_ai(uid,
+            f"Напиши готовий сценарій для TikTok відео на тему '{text}'. "
+            f"Структура: Хук (перші 3 секунди), Основна частина, Заклик до дії. "
+            f"Вкажи що говорити і що показувати. Без зірочок."
+        )
+        parts = split_long_message(result)
+        for i, part in enumerate(parts):
+            await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}" if len(parts) > 1 else part)
         return
     if state == "channel_set":
         settings = {}
@@ -4048,10 +4271,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if state == "imagine":
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        if not check_img_limit(uid):
+            await update.message.reply_text("Ліміт 3 зображення на день вичерпано. /premium для безліміту")
+            return
         await update.message.reply_text("Генерую, зачекай до 60 секунд.")
-        # Беремо тільки суть — перші 100 символів
         clean_prompt = text[:100]
         img = generate_image(clean_prompt)
+        increment_img_count(uid)
         if isinstance(img, bytes):
             buf = io.BytesIO(img); buf.name = "img.jpg"
             await update.message.reply_photo(photo=buf)
@@ -4564,6 +4790,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Аналіз особистості:\n\n{result}")
         return
 
+    # Переклад тексту з фото
+    if user_state.get(uid) == "translate_photo":
+        user_state.pop(uid, None)
+        lang = context.user_data.get("translate_photo_lang", "українська")
+        result = analyze_image(image_url,
+            f"Extract ALL text from this image and translate it to {lang}. "
+            f"Format: Original text → Translation. No Markdown."
+        )
+        await update.message.reply_text(result)
+        return
+
+    # Розпізнавання рукописного тексту
+    if user_state.get(uid) == "handwriting":
+        user_state.pop(uid, None)
+        result = analyze_image(image_url,
+            "Read and transcribe ALL handwritten text from this image. "
+            "Return the exact text as written. If unclear, mark with [?]. "
+            "No Markdown, just the text."
+        )
+        await update.message.reply_text(f"Розпізнаний текст:\n\n{result}")
+        return
+
     # Їжа
     is_food = user_state.get(uid) == "food_photo" or any(
         w in caption_lower for w in ["їжа", "страва", "калорії", "food", "calories", "рецепт"]
@@ -4585,7 +4833,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Читає PDF та текстові файли і аналізує через AI"""
     doc = update.message.document
     fname = doc.file_name or ""
-    allowed = (".pdf", ".txt", ".py", ".js", ".html", ".css", ".json", ".csv", ".md")
+    allowed = (".pdf", ".txt", ".py", ".js", ".html", ".css", ".json", ".csv", ".md", ".docx", ".doc")
 
     if not any(fname.lower().endswith(ext) for ext in allowed):
         await update.message.reply_text("❌ Підтримую: PDF, TXT, PY, JS, HTML, CSS, JSON, CSV, MD")
@@ -4605,7 +4853,19 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reader = pypdf.PdfReader(_io.BytesIO(bytes(file_bytes)))
                 text = "\n".join(page.extract_text() or "" for page in reader.pages)
             except ImportError:
-                await update.message.reply_text("❌ Для PDF потрібен pypdf. Надішли .txt файл.")
+                await update.message.reply_text("❌ Для PDF потрібен pypdf.")
+                return
+        elif fname.lower().endswith((".docx", ".doc")):
+            try:
+                import io as _io
+                from docx import Document as _DocxDocument
+                doc = _DocxDocument(_io.BytesIO(bytes(file_bytes)))
+                text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            except ImportError:
+                # Якщо python-docx не встановлений — читаємо як текст
+                text = file_bytes.decode("utf-8", errors="ignore")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Не вдалося прочитати .docx: {e}")
                 return
         else:
             text = file_bytes.decode("utf-8", errors="ignore")
@@ -4623,6 +4883,117 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     reply = ask_ai(uid, f"{question}\n\n---\n{text}")
     await update.message.reply_text(f"📄 *{fname}*\n\n{reply}", parse_mode="Markdown")
+
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробляє відео — робить субтитри через Whisper"""
+    uid = update.effective_user.id
+    caption = (update.message.caption or "").lower()
+
+    # Перевіряємо чи просять субтитри
+    subtitle_triggers = ["субтитри", "розпізнай", "що говорять", "перепиши", "транскрипція", "subtitles"]
+    wants_subtitles = any(t in caption for t in subtitle_triggers) or user_state.get(uid) == "subtitle_video"
+
+    if not wants_subtitles:
+        # Пропонуємо зробити субтитри
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("Зробити субтитри", callback_data="subtitle|yes")
+        ]])
+        context.user_data["pending_video"] = update.message.video.file_id
+        await update.message.reply_text("Хочеш щоб я зробив субтитри до цього відео?", reply_markup=kb)
+        return
+
+    user_state.pop(uid, None)
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    await update.message.reply_text("Розпізнаю мову у відео...")
+
+    video = update.message.video
+    # Перевіряємо розмір (макс 25MB для Whisper)
+    if video.file_size and video.file_size > 25 * 1024 * 1024:
+        await update.message.reply_text("Відео занадто велике (макс 25MB). Надішли коротше відео.")
+        return
+
+    try:
+        file = await context.bot.get_file(video.file_id)
+        video_bytes = await file.download_as_bytearray()
+
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+        files = {
+            "file": ("video.mp4", bytes(video_bytes), "video/mp4"),
+            "model": (None, "whisper-large-v3"),
+            "response_format": (None, "verbose_json"),
+        }
+        r = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers=headers, files=files, timeout=60
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        # Форматуємо субтитри
+        segments = data.get("segments", [])
+        if segments:
+            lines = []
+            for seg in segments:
+                start = int(seg.get("start", 0))
+                end = int(seg.get("end", 0))
+                text = seg.get("text", "").strip()
+                m_s, s_s = divmod(start, 60)
+                m_e, s_e = divmod(end, 60)
+                lines.append(f"[{m_s:02d}:{s_s:02d} - {m_e:02d}:{s_e:02d}]\n{text}")
+            subtitles = "\n\n".join(lines)
+        else:
+            subtitles = data.get("text", "Не вдалося розпізнати текст")
+
+        parts = split_long_message(f"Субтитри:\n\n{subtitles}")
+        for i, part in enumerate(parts):
+            await update.message.reply_text(f"[{i+1}/{len(parts)}]\n\n{part}" if len(parts) > 1 else part)
+
+    except Exception as e:
+        await update.message.reply_text(f"Не вдалося обробити відео: {e}")
+
+async def subtitle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    if q.data == "subtitle|yes":
+        file_id = context.user_data.get("pending_video")
+        if not file_id:
+            await q.edit_message_text("Відео не знайдено. Надішли ще раз.")
+            return
+        await q.edit_message_text("Розпізнаю мову у відео...")
+        try:
+            file = await context.bot.get_file(file_id)
+            video_bytes = await file.download_as_bytearray()
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+            files = {
+                "file": ("video.mp4", bytes(video_bytes), "video/mp4"),
+                "model": (None, "whisper-large-v3"),
+                "response_format": (None, "verbose_json"),
+            }
+            r = requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=headers, files=files, timeout=60
+            )
+            r.raise_for_status()
+            data = r.json()
+            segments = data.get("segments", [])
+            if segments:
+                lines = []
+                for seg in segments:
+                    start = int(seg.get("start", 0))
+                    end = int(seg.get("end", 0))
+                    text_seg = seg.get("text", "").strip()
+                    m_s, s_s = divmod(start, 60)
+                    m_e, s_e = divmod(end, 60)
+                    lines.append(f"[{m_s:02d}:{s_s:02d} - {m_e:02d}:{s_e:02d}]\n{text_seg}")
+                subtitles = "\n\n".join(lines)
+            else:
+                subtitles = data.get("text", "Не вдалося розпізнати")
+            parts = split_long_message(f"Субтитри:\n\n{subtitles}")
+            for part in parts:
+                await context.bot.send_message(chat_id=uid, text=part)
+        except Exception as e:
+            await context.bot.send_message(chat_id=uid, text=f"Помилка: {e}")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Розпізнає голосове повідомлення через Groq Whisper"""
@@ -4717,6 +5088,9 @@ if __name__ == "__main__":
         ("teach", teach_cmd), ("ad", ad_cmd), ("rstats", realtime_stats_cmd),
         ("viral", viral_title_cmd), ("channel", channel_post_cmd), ("announce", announce_cmd),
         ("personality", personality_cmd), ("support", support_cmd),
+        ("script", script_cmd), ("truthdare", truth_dare_cmd),
+        ("weekhoroscope", weekly_horoscope_cmd), ("imglimit", img_limit_cmd),
+        ("translatephoto", translate_photo_cmd), ("handwriting", handwriting_cmd),
         ("viral", viral_title_cmd), ("coach", coach_cmd),
         ("channel_post", channel_post_cmd), ("setchannel", setchannel_cmd),
     ]
@@ -4749,6 +5123,11 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(persona_callback,      pattern="^persona\\|"))
     app.add_handler(CallbackQueryHandler(ad_callback,           pattern="^ad\\|"))
     app.add_handler(CallbackQueryHandler(channel_callback,      pattern="^channel\\|"))
+    app.add_handler(CallbackQueryHandler(td_callback,           pattern="^td\\|"))
+    app.add_handler(CallbackQueryHandler(whs_callback,          pattern="^whs\\|"))
+    app.add_handler(CallbackQueryHandler(tph_callback,          pattern="^tph\\|"))
+    app.add_handler(CallbackQueryHandler(subtitle_callback,     pattern="^subtitle\\|"))
+    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
     from telegram.ext import PreCheckoutQueryHandler
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
@@ -4864,5 +5243,49 @@ if __name__ == "__main__":
 
     asyncio.get_event_loop().create_task(daily_digest_task())
     asyncio.get_event_loop().create_task(post_update_to_channel())
+
+    # Перевірка оновлень — надсилаємо юзерам повідомлення про нові функції
+    async def notify_users_on_update():
+        await asyncio.sleep(10)
+        try:
+            version_file = "bot_version.txt"
+            try:
+                with open(__file__, encoding='utf-8') as f:
+                    current_lines = len(f.readlines())
+            except:
+                current_lines = 0
+            last_lines = 0
+            if os.path.exists(version_file):
+                try:
+                    last_lines = int(open(version_file).read().strip())
+                except:
+                    pass
+            if abs(current_lines - last_lines) > 20 and last_lines > 0:
+                # Надсилаємо активним юзерам
+                users = {}
+                if os.path.exists(USERS_FILE):
+                    try:
+                        users = json.load(open(USERS_FILE, encoding='utf-8'))
+                    except:
+                        pass
+                sent = 0
+                for uid_str in list(users.keys())[:200]:  # макс 200 юзерів
+                    try:
+                        await app.bot.send_message(
+                            chat_id=int(uid_str),
+                            text="Бот оновився! Нові функції вже доступні. Натисни /start щоб побачити що нового.",
+                            reply_markup=InlineKeyboardMarkup([[
+                                InlineKeyboardButton("Що нового?", callback_data="whats_new")
+                            ]])
+                        )
+                        sent += 1
+                        await asyncio.sleep(0.05)
+                    except:
+                        pass
+            open(version_file, 'w').write(str(current_lines))
+        except Exception as e:
+            logging.error(f"Notify update error: {e}")
+
+    asyncio.get_event_loop().create_task(notify_users_on_update())
 
     app.run_polling(drop_pending_updates=True)
