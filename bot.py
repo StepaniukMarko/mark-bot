@@ -178,7 +178,7 @@ PAGE3_KB = ReplyKeyboardMarkup([
 PAGE4_KB = ReplyKeyboardMarkup([
     ["🔮 Особистість",   "🎭 Персонаж",  "📚 Вчитель"],
     ["💰 Калорії дня",   "📊 Ліміт фото","🏆 Лідерборд"],
-    ["⬅️ Назад"],
+    ["💎 Looksmaxing",   "⬅️ Назад"],
 ], resize_keyboard=True)
 
 def hs_keyboard():
@@ -2288,6 +2288,14 @@ async def qr_read_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state[uid] = "qr_read"
     await update.message.reply_text("Надішли фото з QR-кодом або штрих-кодом — я прочитаю що там:")
 
+async def looksmax_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = "looksmax_photo"
+    await update.message.reply_text(
+        "Looksmaxing аналіз!\n\n"
+        "Надішли чітке фото обличчя (анфас, гарне освітлення) — я дам детальний аналіз і поради."
+    )
+
 async def personality_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user_state[uid] = "personality_photo"
@@ -3832,6 +3840,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await img_limit_cmd(update, context)
         return
 
+    if text == "💎 Looksmaxing":
+        await looksmax_cmd(update, context)
+        return
+
     if text == "🎯 Коуч":
         await coach_cmd(update, context)
         return
@@ -4815,6 +4827,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Аналіз особистості:\n\n{result}")
         return
 
+    # Looksmaxing аналіз
+    if user_state.get(uid) == "looksmax_photo":
+        user_state.pop(uid, None)
+        result = analyze_image(image_url,
+            "You are a looksmaxing expert. Analyze this face in Ukrainian and provide:\n"
+            "1. Загальна оцінка (1-10) з коротким поясненням\n"
+            "2. Сильні сторони зовнішності (що виглядає добре)\n"
+            "3. Що можна покращити:\n"
+            "   - Шкіра і догляд\n"
+            "   - Зачіска\n"
+            "   - Брови і обличчя\n"
+            "   - Стиль і одяг\n"
+            "4. Вправи для покращення зовнішності:\n"
+            "   - Вправи для обличчя (мімічна гімнастика, щелепа, шия)\n"
+            "   - Вправи для постави (бо постава сильно впливає на зовнішність)\n"
+            "   - Топ-3 вправи в залі які найбільше змінять зовнішність\n"
+            "5. Топ-3 конкретні поради що дадуть найбільший ефект за 30 днів\n"
+            "Be honest but constructive. No Markdown, no stars."
+        )
+        await update.message.reply_text(f"Looksmaxing аналіз:\n\n{result}")
+        return
+
     # Переклад тексту з фото
     if user_state.get(uid) == "translate_photo":
         user_state.pop(uid, None)
@@ -5296,6 +5330,7 @@ if __name__ == "__main__":
         ("teach", teach_cmd), ("ad", ad_cmd), ("rstats", realtime_stats_cmd),
         ("viral", viral_title_cmd), ("channel", channel_post_cmd), ("announce", announce_cmd),
         ("personality", personality_cmd), ("support", support_cmd),
+        ("looksmax", looksmax_cmd),
         ("script", script_cmd), ("truthdare", truth_dare_cmd),
         ("weekhoroscope", weekly_horoscope_cmd), ("imglimit", img_limit_cmd),
         ("translatephoto", translate_photo_cmd), ("handwriting", handwriting_cmd),
